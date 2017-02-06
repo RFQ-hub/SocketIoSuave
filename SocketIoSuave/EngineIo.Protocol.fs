@@ -153,11 +153,8 @@ module Payload =
             let builder = StringBuilder(sizeGuess)
             for message in messages do
                 let messageStr = message |> PacketMessage.encodeToString
-                let consideredLenth = if message |> PacketMessage.requireBinary then messageStr.Length - 1 else messageStr.Length
-                builder.Append(consideredLenth) |> ignore
+                builder.Append(messageStr.Length) |> ignore
                 builder.Append(':') |> ignore
-                if message |> PacketMessage.requireBinary then
-                    builder.Append('b') |> ignore        
                 builder.Append(messageStr) |> ignore
             
             builder.ToString()

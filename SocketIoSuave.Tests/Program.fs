@@ -5,43 +5,56 @@ open Expecto
 open SocketIoSuave
 open SocketIoSuave.EngineIo.Protocol
 
-let private testEncodeToString message expected format =
-    Expect.equal (message |> PacketMessage.encodeToString) expected format
+let private testPacketToString message expected format =
+    Expect.equal (message |> PacketMessage.encodeToString) expected ""
+
+let private testPayloadToString messages expected format =
+    Expect.equal (Payload(messages) |> Payload.encodeToString) expected format
 
 [<Tests>]
 let tests =
     testList "encode" [
-        testList "string encoding" [
+        testList "packet to string" [
             testCase "open" <| fun _ ->
                 let handshake = { Sid= "xxx";Upgrades=[|"foo";"bar"|];PingTimeout=42; PingInterval=43 }
-                testEncodeToString (Open(handshake)) @"0{""sid"":""xxx"",""upgrades"":[""foo"",""bar""],""pingTimeout"":42,""pingInterval"":43}" "open"
+                testPacketToString (Open(handshake)) @"0{""sid"":""xxx"",""upgrades"":[""foo"",""bar""],""pingTimeout"":42,""pingInterval"":43}" "open"
 
             testCase "close" <| fun _ ->
-                testEncodeToString (Close) "1" "close"
+                testPacketToString (Close) "1" "close"
 
             testCase "ping" <| fun _ ->
-                testEncodeToString (Ping(String("probe"))) "2probe" "ping"
+                testPacketToString (Ping(String("probe"))) "2probe" "ping"
 
             testCase "ping (binary)" <| fun _ ->
-                testEncodeToString (Ping(Binary([|1uy;2uy;3uy|] |> Segment.ofArray))) "b2AQID" "ping (binary)"
+                testPacketToString (Ping(Binary([|1uy;2uy;3uy|] |> Segment.ofArray))) "b2AQID" "ping (binary)"
 
             testCase "pong" <| fun _ ->
-                testEncodeToString (Pong(String("probe"))) "3probe" "pong"
+                testPacketToString (Pong(String("probe"))) "3probe" "pong"
 
             testCase "pong (binary)" <| fun _ ->
-                testEncodeToString (Pong(Binary([|1uy;2uy;3uy|] |> Segment.ofArray))) "b3AQID" "pong (binary)"
+                testPacketToString (Pong(Binary([|1uy;2uy;3uy|] |> Segment.ofArray))) "b3AQID" "pong (binary)"
 
             testCase "message" <| fun _ ->
-                testEncodeToString (Message(String("Hello world"))) "4Hello world" "message"
+                testPacketToString (Message(String("Hello world"))) "4Hello world" "message"
 
             testCase "message (binary)" <| fun _ ->
-                testEncodeToString (Message(Binary([|1uy;2uy;3uy|] |> Segment.ofArray))) "b4AQID" "message (binary)"
+                testPacketToString (Message(Binary([|1uy;2uy;3uy|] |> Segment.ofArray))) "b4AQID" "message (binary)"
 
             testCase "close" <| fun _ ->
-                testEncodeToString (Upgrade) "5" "close"
+                testPacketToString (Upgrade) "5" "close"
 
             testCase "noop" <| fun _ ->
-                testEncodeToString (Noop) "6" "noop"
+                testPacketToString (Noop) "6" "noop"
+        ]
+        testList "payload to string" [
+            testCase "empty" <| fun _ ->
+                testPayloadToString [] "0:" "empty"
+            testCase "single message" <| fun _ ->
+                testPayloadToString [Message(String("Hello world"))] "12:4Hello world" "message"
+            testCase "two messages" <| fun _ ->
+                testPayloadToString [Message(String("Hello"));Message(String("world"))] "6:4Hello6:4world" "2 messages"
+            testCase "single binary message" <| fun _ ->
+                testPayloadToString [Message(Binary([|1uy;2uy;3uy|] |> Segment.ofArray))] "6:b4AQID" "message"
         ]
     ]
 
