@@ -46,7 +46,7 @@
   <ItemGroup>
     <Compile Include="AssemblyInfo.fs" />
     <Compile Include="Segment.fs" />
-    <Compile Include="Experiments.fs" />
+    <Compile Include="EngineIo.Protocol.fs" />
     <Compile Include="Program.fs" />
     <None Include="App.config" />
     <None Include="paket.references" />
