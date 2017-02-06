@@ -1,0 +1,14 @@
+source https://rfq-nuget-dev.wineur.itgeurope.com/nuget/nuget_org_cache/
+
+framework: >= net40
+
+nuget FSharp.Core
+nuget Suave
+nuget NewtonSoft.Json
+
+nuget RestSharp
+nuget Chessie
+
+nuget Expecto
+nuget Expecto.BenchmarkDotNet
+nuget Expecto.FsCheck
