@@ -1,4 +1,6 @@
-﻿module Experiments
+﻿module SocketIoSuave.EngineIo.Protocol
+
+open SocketIoSuave
 
 (*
 
@@ -10,147 +12,151 @@ https://socketio4net.codeplex.com/SourceControl/latest#SocketIO/IEndPointClient.
 https://github.com/ocharles/engine.io
 *)
 
-module Segment =
-    open System
-
-    let ofArray (arr: 't[]) = new ArraySegment<'t>(arr)
-
-    let empty = Array.empty |> ofArray
-
-    let take count (segment: ArraySegment<'t>) =
-        new ArraySegment<'t>(segment.Array, segment.Offset, min count segment.Count)
-
-    let totalSize (segments: ArraySegment<'t> seq) =
-        segments |> Seq.sumBy (fun s -> s.Count)
-
-    let concat (segments: ArraySegment<'t> seq) =
-        let count = totalSize segments
-        let result = Array.create<'t> count Unchecked.defaultof<'t>
-        let mutable i = 0L
-        for segment in segments do
-            Array.Copy(segment.Array, int64 segment.Offset, result, i, int64 segment.Count)
-            i <- i + (int64 segment.Count)
-        result
-
-    let toArray (segment: ArraySegment<'t>) =
-        if segment.Offset = 0 && segment.Count = segment.Array.Length then
-            segment.Array
-        else
-            let result = Array.zeroCreate segment.Count
-            Array.Copy(segment.Array, segment.Offset, result, 0, segment.Count)
-            result
-
 open System
-open System.IO
-open System.Text
 
 type Data =
 | Empty
 | String of string
 | Binary of ArraySegment<byte>
-with
-    member this.RequireBinary () =
-        match this with
-        | Empty -> false
-        | String _ -> false
-        | Binary _ -> true
 
-    member this.EncodeToBinary () =
-        match this with
-        | Empty -> Segment.empty
-        | String s -> Encoding.UTF8.GetBytes s |> Segment.ofArray
-        | Binary b -> b
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix )>]
+module Data =
+    open System.Text
 
-    member this.EncodeToString () =
-        match this with
-        | Empty -> ""
-        | String s -> s
-        | Binary b ->
-            // new CryptoStream(stream, new ToBase64Transform(), CryptoStreamMode.Write)
-            b |> Segment.toArray |> Convert.ToBase64String
+    let requireBinary = function
+    | Empty -> false
+    | String _ -> false
+    | Binary _ -> true
 
-    member this.GuessEncodeToStringLength() =
-        match this with
-        | Empty -> 0
-        | String s -> s.Length
-        | Binary b -> int (ceil (float b.Count / 3.) * 4.)
+    let encodeToBinary = function
+    | Empty -> Segment.empty
+    | String s -> Encoding.UTF8.GetBytes s |> Segment.ofArray
+    | Binary b -> b
+
+    let encodeToString = function
+    | Empty -> ""
+    | String s -> s
+    | Binary b ->
+        // new CryptoStream(stream, new ToBase64Transform(), CryptoStreamMode.Write)
+        b |> Segment.toArray |> Convert.ToBase64String
+
+    let guessEncodeToStringLength = function
+    | Empty -> 0
+    | String s -> s.Length
+    | Binary b -> int (ceil (float b.Count / 3.) * 4.)
+
+type OpenHandshake =
+    {
+        Sid: string
+        Upgrades: string[]
+        PingTimeout: int
+        PingInterval: int
+    }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module OpenHandshake =
+    open Newtonsoft.Json
+    open Newtonsoft.Json.Serialization
+
+    let private jsonSerializerSettings =
+        let result = new JsonSerializerSettings()
+        result.ContractResolver <- new CamelCasePropertyNamesContractResolver()
+        result
+
+    let encodeToString handshake =
+        JsonConvert.SerializeObject(handshake, Formatting.None, jsonSerializerSettings)
 
 type PacketMessage =
-| Open
+| Open of OpenHandshake
 | Close
 | Ping of Data
 | Pong of Data
 | Message of Data
 | Upgrade
 | Noop
-with
-    member this.GetTypeId () =
-        match this with
-        | Open -> 0uy
-        | Close -> 1uy
-        | Ping _ -> 2uy
-        | Pong _ -> 3uy
-        | Message _ -> 4uy
-        | Upgrade -> 5uy
-        | Noop -> 6uy
 
-    member this.GetData () =
-        match this with
-        | Open -> Empty
-        | Close -> Empty
-        | Ping x -> x
-        | Pong x -> x
-        | Message x -> x
-        | Upgrade -> Empty
-        | Noop -> Empty
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module PacketMessage =
+    let getTypeId = function
+    | Open _ -> 0uy
+    | Close -> 1uy
+    | Ping _ -> 2uy
+    | Pong _ -> 3uy
+    | Message _ -> 4uy
+    | Upgrade -> 5uy
+    | Noop -> 6uy
 
-    member this.EncodeToBinary () =
-        let typeId = this.GetTypeId()
-        let data = this.GetData().EncodeToBinary()
+    let getData = function
+    | Open handshake -> String (OpenHandshake.encodeToString handshake)
+    | Close -> Empty
+    | Ping x -> x
+    | Pong x -> x
+    | Message x -> x
+    | Upgrade -> Empty
+    | Noop -> Empty
+
+    let requireBinary = function
+    | Open _ -> false
+    | Close -> false
+    | Upgrade -> false
+    | Noop -> false
+    | x -> x |> getData |> Data.requireBinary
+
+    let encodeToBinary packet =
+        let typeId = getTypeId packet
+        let data = packet |> getData |> Data.encodeToBinary
         let result = Array.zeroCreate (data.Count + 1)
         result.[0] <- typeId
         Array.Copy(data.Array, data.Offset, result, 1, data.Count)
         result
 
-    member this.EncodeToString () =
-        let data = this.GetData()
-        let header = if data.RequireBinary() then "b" else ""
-        header + this.GetTypeId().ToString() + data.EncodeToString()
+    let encodeToString packet =
+        let typeId = getTypeId packet
+        let data = packet |> getData
+        let header = if data |> Data.requireBinary then "b" else ""
+        header + typeId.ToString() + (data |> Data.encodeToString)
 
 type Payload =
 | Payload of PacketMessage list
-with
-    member this.GetMessages() =
-        match this with | Payload m -> m
 
-    member this.EncodeToBinary () =
-        let messages = this.GetMessages()
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Payload =
+    open System.IO
+    open System.Text
+
+    let getMessages = function | Payload m -> m
+
+    let encodeToBinary payload =
+        let messages = payload |> getMessages
         let stream = new MemoryStream()
         for message in messages do
-            let requireBinary = message.GetData().RequireBinary()
+            let requireBinary = message |> PacketMessage.requireBinary
             stream.WriteByte(if requireBinary then 1uy else 0uy)
-            let binData = if requireBinary then message.EncodeToBinary() else Encoding.UTF8.GetBytes(message.EncodeToString())
+            let binData =
+                if requireBinary then
+                    message |> PacketMessage.encodeToBinary
+                else
+                    Encoding.UTF8.GetBytes(message |> PacketMessage.encodeToString)
             let sizeString = binData.Length.ToString()
             for chr in sizeString do
                 stream.WriteByte(Byte.Parse(string chr))
             stream.WriteByte(255uy)
             stream.Write(binData, 0, binData.Length)
         stream.ToArray()
-                
 
-    member this.EncodeToString() =
-        let messages = this.GetMessages()
+    let encodeToString payload =
+        let messages = payload |> getMessages
         if messages.Length = 0 then
             "0:"
         else
-            let guess = messages |> List.fold (fun acc x -> acc + x.GetData().GuessEncodeToStringLength() + 6) 0
-            let builder = StringBuilder(guess)
+            let sizeGuess = messages |> List.fold (fun acc m -> acc + (m |> PacketMessage.getData |> Data.guessEncodeToStringLength) + 6) 0
+            let builder = StringBuilder(sizeGuess)
             for message in messages do
-                let messageStr = message.EncodeToString()
-                let consideredLenth = if message.GetData().RequireBinary() then messageStr.Length - 1 else messageStr.Length
+                let messageStr = message |> PacketMessage.encodeToString
+                let consideredLenth = if message |> PacketMessage.requireBinary then messageStr.Length - 1 else messageStr.Length
                 builder.Append(consideredLenth) |> ignore
                 builder.Append(':') |> ignore
-                if message.GetData().RequireBinary() then
+                if message |> PacketMessage.requireBinary then
                     builder.Append('b') |> ignore        
                 builder.Append(messageStr) |> ignore
             

@@ -2,41 +2,46 @@
 // See the 'F# Tutorial' project for more help.
 
 open Expecto
-open Experiments
+open SocketIoSuave
+open SocketIoSuave.EngineIo.Protocol
+
+let private testEncodeToString message expected format =
+    Expect.equal (message |> PacketMessage.encodeToString) expected format
 
 [<Tests>]
 let tests =
     testList "encode" [
         testList "string encoding" [
             testCase "open" <| fun _ ->
-                Expect.equal (Open.EncodeToString()) "0" "open"
+                let handshake = { Sid= "xxx";Upgrades=[|"foo";"bar"|];PingTimeout=42; PingInterval=43 }
+                testEncodeToString (Open(handshake)) @"0{""sid"":""xxx"",""upgrades"":[""foo"",""bar""],""pingTimeout"":42,""pingInterval"":43}" "open"
 
             testCase "close" <| fun _ ->
-                Expect.equal (Close.EncodeToString()) "1" "close"
+                testEncodeToString (Close) "1" "close"
 
             testCase "ping" <| fun _ ->
-                Expect.equal (Ping(String("probe")).EncodeToString()) "2probe" "ping"
+                testEncodeToString (Ping(String("probe"))) "2probe" "ping"
 
             testCase "ping (binary)" <| fun _ ->
-                Expect.equal (Ping(Binary([|1uy;2uy;3uy|] |> Segment.ofArray)).EncodeToString()) "b2AQID" "ping (binary)"
+                testEncodeToString (Ping(Binary([|1uy;2uy;3uy|] |> Segment.ofArray))) "b2AQID" "ping (binary)"
 
             testCase "pong" <| fun _ ->
-                Expect.equal (Pong(String("probe")).EncodeToString()) "3probe" "pong"
+                testEncodeToString (Pong(String("probe"))) "3probe" "pong"
 
             testCase "pong (binary)" <| fun _ ->
-                Expect.equal (Pong(Binary([|1uy;2uy;3uy|] |> Segment.ofArray)).EncodeToString()) "b3AQID" "pong (binary)"
+                testEncodeToString (Pong(Binary([|1uy;2uy;3uy|] |> Segment.ofArray))) "b3AQID" "pong (binary)"
 
             testCase "message" <| fun _ ->
-                Expect.equal (Message(String("Hello world")).EncodeToString()) "4Hello world" "message"
+                testEncodeToString (Message(String("Hello world"))) "4Hello world" "message"
 
             testCase "message (binary)" <| fun _ ->
-                Expect.equal (Message(Binary([|1uy;2uy;3uy|] |> Segment.ofArray)).EncodeToString()) "b4AQID" "message (binary)"
+                testEncodeToString (Message(Binary([|1uy;2uy;3uy|] |> Segment.ofArray))) "b4AQID" "message (binary)"
 
             testCase "close" <| fun _ ->
-                Expect.equal (Upgrade.EncodeToString()) "5" "close"
+                testEncodeToString (Upgrade) "5" "close"
 
             testCase "noop" <| fun _ ->
-                Expect.equal (Noop.EncodeToString()) "6" "noop"
+                testEncodeToString (Noop) "6" "noop"
         ]
     ]
 
