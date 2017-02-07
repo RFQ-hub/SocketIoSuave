@@ -24,7 +24,6 @@ NUGET
       Expecto (>= 3.2.1)
       FsCheck (>= 2.6.2)
       FSharp.Core (>= 3.1.2.5)
-    Expecto.VisualStudio.TestAdapter (1.0.0-alpha005) - version_in_path: true
     FsCheck (2.7.0)
       FSharp.Core (>= 3.1.2.5)
     FSharp.Core (4.0.0.1)

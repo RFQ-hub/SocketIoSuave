@@ -32,7 +32,11 @@ module Data =
 
     let encodeToBinary = function
     | Empty -> Segment.empty
-    | String s -> Encoding.UTF8.GetBytes s |> Segment.ofArray
+    | String s ->
+        if isNull s || s.Length = 0 then
+            Segment.empty
+        else
+            Encoding.UTF8.GetBytes s |> Segment.ofArray
     | Binary b -> b
 
     let encodeToString = function
@@ -44,8 +48,27 @@ module Data =
 
     let guessEncodeToStringLength = function
     | Empty -> 0
-    | String s -> s.Length
+    | String s -> if isNull s then 0 else s.Length
     | Binary b -> int (ceil (float b.Count / 3.) * 4.)
+
+    let decodeFromBinary isBinary (dataBytes: ByteSegment) =
+        if dataBytes.Count = 0 then
+            Empty
+        else if isBinary then
+            Binary(dataBytes)
+        else
+            String(Text.Encoding.UTF8.GetString(dataBytes.Array, dataBytes.Offset, dataBytes.Count))
+
+    let decodeFromString isBinary (str: string) offset count =
+        if count = 0 then
+            Empty
+        else if isBinary then
+            let subString = str.Substring(offset, count)
+            let data = Convert.FromBase64String(subString)
+            Binary(data |> Segment.ofArray)
+        else
+            let subString = str.Substring(offset, count)
+            String(subString)
 
 type OpenHandshake =
     {
@@ -82,8 +105,6 @@ type PacketMessage =
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module PacketMessage =
-    open System.IO
-
     let getTypeId = function
     | Open _ -> 0uy
     | Close -> 1uy
@@ -110,12 +131,19 @@ module PacketMessage =
     | x -> x |> getData |> Data.requireBinary
 
     let encodeToBinary packet =
-        let typeId = getTypeId packet
-        let data = packet |> getData |> Data.encodeToBinary
-        let result = Array.zeroCreate (data.Count + 1)
+        // Data
+        let data = packet |> getData
+        let dataBytes = data |> Data.encodeToBinary
+
+        // Type ID
+        let typeIdRaw = getTypeId packet
+        let typeId = if data |> Data.requireBinary then typeIdRaw else byte (typeIdRaw.ToString().[0])
+
+        // Build packet
+        let result = Array.zeroCreate (dataBytes.Count + 1)
         result.[0] <- typeId
-        Array.Copy(data.Array, data.Offset, result, 1, data.Count)
-        result
+        Array.Copy(dataBytes.Array, dataBytes.Offset, result, 1, dataBytes.Count)
+        result |> Segment.ofArray
 
     let encodeToString packet =
         let typeId = getTypeId packet
@@ -123,18 +151,12 @@ module PacketMessage =
         let header = if data |> Data.requireBinary then "b" else ""
         header + typeId.ToString() + (data |> Data.encodeToString)
 
-    let decodeBinaryPacket (data: ByteSegment) isBinary =
-        let typeId = data |> Segment.valueAt 0
-        let dataBytes = data |> Segment.skip 1
-        let data =
-            if dataBytes.Count = 0 then
-                Empty
-            else if isBinary then
-                Binary(dataBytes)
-            else
-                String(Text.Encoding.UTF8.GetString(dataBytes.Array, dataBytes.Offset, dataBytes.Count))
-                
-        let failIfData () = match data with | Empty -> () | _ -> failwithf "Packet of type %A doesn't support data" typeId
+    let private failIfData data typeId =
+        match data with
+        | Empty -> ()
+        | _ -> failwithf "Packet of type %A doesn't support data" typeId
+
+    let private fromData typeId data=
         match typeId with
         | 0uy ->
             match data with
@@ -143,7 +165,7 @@ module PacketMessage =
                 Open handshake
             | _ -> failwithf "Unexpected content for handshake: %A" data
         | 1uy ->
-            failIfData()
+            failIfData data typeId
             Close
         | 2uy ->
             Ping(data)
@@ -152,13 +174,45 @@ module PacketMessage =
         | 4uy ->
             Message(data)
         | 5uy ->
-            failIfData()
+            failIfData data typeId
             Upgrade
         | 6uy ->
-            failIfData()
+            failIfData data typeId
             Noop
         | _ -> failwithf "Unknown packet type: %A" typeId
-            
+
+    let decodeFromBinary isBinary (data: ByteSegment) =
+        let typeIdRaw = data |> Segment.valueAt 0
+        let typeId = if isBinary then typeIdRaw else Byte.Parse (string (char typeIdRaw))
+        let dataBytes = data |> Segment.skip 1
+        let data = dataBytes |> Data.decodeFromBinary isBinary
+                
+        fromData typeId data
+
+    let decodeFromStringSubset offset count (str: string) =
+        if offset < 0 then raise (ArgumentOutOfRangeException("offset", offset, "offset is negative"))
+        if count < 0 then raise (ArgumentOutOfRangeException("count", offset, "count is negative"))
+        if offset + count > str.Length then raise (ArgumentException("The designated range is out of the string"))
+
+        let mutable currentOffset = offset
+        let firstChar = str.[currentOffset]
+        currentOffset <- currentOffset + 1
+        let isBinary = firstChar = 'b'
+        let typeIdChar =
+            if isBinary then
+                let c = str.[currentOffset]
+                currentOffset <- currentOffset + 1
+                c
+            else
+                firstChar
+        let typeId = typeIdChar |> string |> Byte.Parse
+
+        let dataCount = count - (currentOffset - offset)
+        let data = Data.decodeFromString isBinary str currentOffset dataCount
+        
+        fromData typeId data
+
+    let decodeFromString (str: string) = decodeFromStringSubset 0 str.Length str
 
 type Payload =
 | Payload of PacketMessage list
@@ -180,13 +234,13 @@ module Payload =
                 if requireBinary then
                     message |> PacketMessage.encodeToBinary
                 else
-                    Encoding.UTF8.GetBytes(message |> PacketMessage.encodeToString)
-            let sizeString = binData.Length.ToString()
+                    Encoding.UTF8.GetBytes(message |> PacketMessage.encodeToString) |> Segment.ofArray
+            let sizeString = binData.Count.ToString()
             for chr in sizeString do
                 stream.WriteByte(Byte.Parse(string chr))
             stream.WriteByte(255uy)
-            stream.Write(binData, 0, binData.Length)
-        stream.ToArray()
+            stream.Write(binData.Array, binData.Offset, binData.Count)
+        stream.ToArray() |> Segment.ofArray
 
     let encodeToString payload =
         let messages = payload |> getMessages
@@ -203,9 +257,44 @@ module Payload =
             
             builder.ToString()
 
-    let decodeBinaryPayload (data: ByteSegment) =
+    let decodeFromBinary (data: ByteSegment) =
         let mutable currentPos = data.Offset
-        while currentPos < data.Offset + data.Count do
-            let isBinary = data.Array.[currentPos] = 1uy
-            currentPos <- currentPos + 1
-            
+        let sizeStringBuilder = StringBuilder(5)
+        let packets = [
+            while currentPos < data.Offset + data.Count do
+                let isBinary = data.Array.[currentPos] = 1uy
+                currentPos <- currentPos + 1
+                sizeStringBuilder.Clear() |> ignore
+                while data.Array.[currentPos] <> 255uy do
+                    let currentByte = data.Array.[currentPos]
+                    sizeStringBuilder.Append(currentByte.ToString()) |> ignore
+                    currentPos <- currentPos + 1
+                currentPos <- currentPos + 1
+                let size = Int32.Parse(sizeStringBuilder.ToString())
+                if size <> 0 then
+                    let subset = data |> Segment.subset currentPos size
+                    let packet = PacketMessage.decodeFromBinary isBinary subset
+                    currentPos <- currentPos + size
+                    yield packet
+        ]
+
+        Payload(packets)
+
+    let decodeFromString (str: string) =
+        let mutable currentPos = 0
+        let sizeStringBuilder = StringBuilder(5)
+        let packets = [
+            while currentPos < str.Length do
+                sizeStringBuilder.Clear() |> ignore
+                while currentPos < str.Length && str.[currentPos] <> ':' do
+                    sizeStringBuilder.Append(str.[currentPos]) |> ignore
+                    currentPos <- currentPos + 1
+                currentPos <- currentPos + 1
+                let size = Int32.Parse(sizeStringBuilder.ToString())
+                if size <> 0 then
+                    let packet = PacketMessage.decodeFromStringSubset currentPos size str
+                    currentPos <- currentPos + size
+                    yield packet
+        ]
+
+        Payload(packets)

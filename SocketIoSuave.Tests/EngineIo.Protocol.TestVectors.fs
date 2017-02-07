@@ -1,4 +1,4 @@
-﻿module SocketIoSuave.EngineIo.ProtocolTests
+﻿module SocketIoSuave.EngineIo.Protocol.TestVectors
 
 open Expecto
 open SocketIoSuave
@@ -6,14 +6,14 @@ open SocketIoSuave.EngineIo.Protocol
 
 let private testPacketToBinary message expected format =
     let expected = expected |> Seq.map(byte) |> Seq.toArray
-    Expect.equal (message |> PacketMessage.encodeToBinary) expected format
+    Expect.equal (message |> PacketMessage.encodeToBinary |> Segment.toArray) expected format
 
 let private testPacketToString message expected format =
     Expect.equal (message |> PacketMessage.encodeToString) expected format
 
 let private testPayloadToBinary messages (expected: int seq) format =
     let expected = expected |> Seq.map(byte) |> Seq.toArray
-    Expect.equal (Payload(messages) |> Payload.encodeToBinary) expected format
+    Expect.equal (Payload(messages) |> Payload.encodeToBinary |> Segment.toArray) expected format
 
 let private testPayloadToString messages expected format =
     Expect.equal (Payload(messages) |> Payload.encodeToString) expected format
