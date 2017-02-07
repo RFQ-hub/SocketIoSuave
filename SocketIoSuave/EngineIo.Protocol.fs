@@ -139,17 +139,24 @@ module PacketMessage =
         let typeIdRaw = getTypeId packet
         let typeId = if data |> Data.requireBinary then typeIdRaw else byte (typeIdRaw.ToString().[0])
 
-        // Build packet
+        // Build
         let result = Array.zeroCreate (dataBytes.Count + 1)
         result.[0] <- typeId
         Array.Copy(dataBytes.Array, dataBytes.Offset, result, 1, dataBytes.Count)
         result |> Segment.ofArray
 
     let encodeToString packet =
-        let typeId = getTypeId packet
+        // Data
         let data = packet |> getData
+        let dataString = data |> Data.encodeToString
+
+        // Type ID
+        let typeIdRaw = getTypeId packet
+        let typeId = typeIdRaw.ToString()
         let header = if data |> Data.requireBinary then "b" else ""
-        header + typeId.ToString() + (data |> Data.encodeToString)
+
+        // Build
+        header + typeId + dataString
 
     let private failIfData data typeId =
         match data with

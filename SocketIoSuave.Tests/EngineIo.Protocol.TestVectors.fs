@@ -61,34 +61,34 @@ let tests =
             testCase "open" <| fun _ ->
                 let handshake = { Sid= "xxx";Upgrades=[|"foo";"bar"|];PingTimeout=42; PingInterval=43 }
                 let handshakeStr = @"{""sid"":""xxx"",""upgrades"":[""foo"",""bar""],""pingTimeout"":42,""pingInterval"":43}"
-                testPacketToBinary (Open(handshake)) ([0] |> appendUtf8 handshakeStr) "open"
+                testPacketToBinary (Open(handshake)) ([48] |> appendUtf8 handshakeStr) "open"
 
             testCase "close" <| fun _ ->
-                testPacketToBinary (Close) [1] "close"
+                testPacketToBinary (Close) [49] "close"
 
             testCase "ping" <| fun _ ->
-                testPacketToBinary (Ping(String("probe"))) ([2] |> appendUtf8 "probe") "ping"
+                testPacketToBinary (Ping(String("probe"))) ([50] |> appendUtf8 "probe") "ping"
 
             testCase "ping (binary)" <| fun _ ->
                 testPacketToBinary (Ping(Binary([|1uy;2uy;3uy|] |> Segment.ofArray))) [2;1;2;3] "ping (binary)"
 
             testCase "pong" <| fun _ ->
-                testPacketToBinary (Pong(String("probe"))) ([3] |> appendUtf8 "probe") "ping"
+                testPacketToBinary (Pong(String("probe"))) ([51] |> appendUtf8 "probe") "ping"
 
             testCase "pong (binary)" <| fun _ ->
                 testPacketToBinary (Pong(Binary([|1uy;2uy;3uy|] |> Segment.ofArray))) [3;1;2;3] "pong (binary)"
 
             testCase "message" <| fun _ ->
-                testPacketToBinary (Message(String("Hello world"))) ([4] |> appendUtf8 "Hello world") "message"
+                testPacketToBinary (Message(String("Hello world"))) ([52] |> appendUtf8 "Hello world") "message"
 
             testCase "message (binary)" <| fun _ ->
                 testPacketToBinary (Message(Binary([|1uy;2uy;3uy|] |> Segment.ofArray))) [4;1;2;3] "message (binary)"
 
             testCase "upgrade" <| fun _ ->
-                testPacketToBinary (Upgrade) [5] "upgrade"
+                testPacketToBinary (Upgrade) [53] "upgrade"
 
             testCase "noop" <| fun _ ->
-                testPacketToBinary (Noop) [6] "noop"
+                testPacketToBinary (Noop) [54] "noop"
         ]
 
         testList "payload to string" [
