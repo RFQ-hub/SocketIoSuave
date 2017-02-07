@@ -14,10 +14,12 @@ https://github.com/ocharles/engine.io
 
 open System
 
+type ByteSegment = ArraySegment<byte>
+
 type Data =
 | Empty
 | String of string
-| Binary of ArraySegment<byte>
+| Binary of ByteSegment
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix )>]
 module Data =
@@ -63,8 +65,11 @@ module OpenHandshake =
         result.ContractResolver <- new CamelCasePropertyNamesContractResolver()
         result
 
-    let encodeToString handshake =
+    let encode handshake =
         JsonConvert.SerializeObject(handshake, Formatting.None, jsonSerializerSettings)
+
+    let decode s =
+        JsonConvert.DeserializeObject<OpenHandshake>(s, jsonSerializerSettings)
 
 type PacketMessage =
 | Open of OpenHandshake
@@ -77,6 +82,8 @@ type PacketMessage =
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module PacketMessage =
+    open System.IO
+
     let getTypeId = function
     | Open _ -> 0uy
     | Close -> 1uy
@@ -87,7 +94,7 @@ module PacketMessage =
     | Noop -> 6uy
 
     let getData = function
-    | Open handshake -> String (OpenHandshake.encodeToString handshake)
+    | Open handshake -> String (OpenHandshake.encode handshake)
     | Close -> Empty
     | Ping x -> x
     | Pong x -> x
@@ -115,6 +122,43 @@ module PacketMessage =
         let data = packet |> getData
         let header = if data |> Data.requireBinary then "b" else ""
         header + typeId.ToString() + (data |> Data.encodeToString)
+
+    let decodeBinaryPacket (data: ByteSegment) isBinary =
+        let typeId = data |> Segment.valueAt 0
+        let dataBytes = data |> Segment.skip 1
+        let data =
+            if dataBytes.Count = 0 then
+                Empty
+            else if isBinary then
+                Binary(dataBytes)
+            else
+                String(Text.Encoding.UTF8.GetString(dataBytes.Array, dataBytes.Offset, dataBytes.Count))
+                
+        let failIfData () = match data with | Empty -> () | _ -> failwithf "Packet of type %A doesn't support data" typeId
+        match typeId with
+        | 0uy ->
+            match data with
+            | String str ->
+                let handshake = OpenHandshake.decode str
+                Open handshake
+            | _ -> failwithf "Unexpected content for handshake: %A" data
+        | 1uy ->
+            failIfData()
+            Close
+        | 2uy ->
+            Ping(data)
+        | 3uy ->
+            Pong(data)
+        | 4uy ->
+            Message(data)
+        | 5uy ->
+            failIfData()
+            Upgrade
+        | 6uy ->
+            failIfData()
+            Noop
+        | _ -> failwithf "Unknown packet type: %A" typeId
+            
 
 type Payload =
 | Payload of PacketMessage list
@@ -158,3 +202,10 @@ module Payload =
                 builder.Append(messageStr) |> ignore
             
             builder.ToString()
+
+    let decodeBinaryPayload (data: ByteSegment) =
+        let mutable currentPos = data.Offset
+        while currentPos < data.Offset + data.Count do
+            let isBinary = data.Array.[currentPos] = 1uy
+            currentPos <- currentPos + 1
+            
