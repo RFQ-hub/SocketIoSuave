@@ -14,6 +14,9 @@ type EngineIoConfig =
         CORSConfig: CORSConfig
         PingTimeout: TimeSpan
         PingInterval: TimeSpan
+        CookieName: string option
+        CookiePath: string option
+        CookieHttpOnly: bool
         getHandshakeSid: HttpContext -> Async<string>
         onPacket: HttpContext -> PacketMessage -> Async<unit>
         getPacket: HttpContext -> Async<PacketMessage option>
@@ -21,11 +24,15 @@ type EngineIoConfig =
     }
 
     with static member empty = {
+            CookieName = Some "io"
+            CookiePath = Some "/"
+            CookieHttpOnly = false
             Upgrades = Array.empty
             CORSConfig =
                 { defaultCORSConfig with
                     allowedMethods = InclusiveOption.Some([HttpMethod.GET; HttpMethod.POST])
-                    allowedUris = InclusiveOption.All }
+                    allowedUris = InclusiveOption.All
+                    allowCookies = false }
             PingTimeout = TimeSpan.FromSeconds(60.)
             PingInterval = TimeSpan.FromSeconds(25.)
             getHandshakeSid = (fun _ -> async { return Guid.NewGuid().ToString() })
@@ -34,41 +41,83 @@ type EngineIoConfig =
             getPayload = (fun _ -> async { return None })
         }
 
-(*
-[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
-module EngineIoConfig =
-    let empty =
-    *)
-
 let okJson x : WebPart = Writers.setMimeType "application/json" >=> Successful.OK x
 
-let parseIntChoice s =
-    let ok, i = Int32.TryParse(s)
-    if ok then Choice1Of2 i else Choice2Of2 (sprintf "Not a number: '%s'" s)
+module Choice =
+    /// Return the value if it's a Choice1Of2 or default' otherwise
+    let defaultArg default' = function | Choice1Of2 x -> x | Choice2Of2 _ -> default'
+
+    let parseInt s =
+        let ok, i = Int32.TryParse(s)
+        if ok then Choice1Of2 i else Choice2Of2 (sprintf "Not a number: '%s'" s)
+
+    let parseIntAsBool s = parseInt s |> Choice.map((<>) 0)
 
 type EngineIoContext = 
     {
         Transport: string
         JsonPIndex: int option
         SessionId: string
-        Base64: bool
+        SupportsBinary: bool
+        IsBinary: bool
     }
 
     with static member FromHttp (ctx: HttpContext) = {
-            Transport = defaultArg (ctx.request.queryParam "transport" |> Option.ofChoice) "polling"
-            JsonPIndex = ctx.request.queryParam "j" |> Choice.bind parseIntChoice |> Option.ofChoice
-            SessionId = defaultArg (ctx.request.queryParam "sid" |> Option.ofChoice) ""
-            Base64 = (defaultArg (ctx.request.queryParam "b64" |> Choice.bind parseIntChoice |> Option.ofChoice) 0) = 1
+            Transport = ctx.request.queryParam "transport" |> Choice.defaultArg "polling"
+            JsonPIndex = ctx.request.queryParam "j" |> Choice.bind Choice.parseInt |> Option.ofChoice
+            SessionId = ctx.request.queryParam "sid" |> Choice.defaultArg ""
+            SupportsBinary = ctx.request.queryParam "b64" |> Choice.bind Choice.parseIntAsBool |> Choice.defaultArg false
+            IsBinary = defaultArg (ctx |> Headers.getFirstHeader "content-type") "" = "application/octet-stream"
         }
 
-let serveSocketIo (config: EngineIoConfig) =
-    let respondPayload payload engineContext = 
-        if engineContext.Base64 then
-            Successful.OK (payload |> Payload.encodeToString)
-        else
-            Successful.ok (payload |> Payload.encodeToBinary |> Segment.toArray)
+// Fixed in next Suave version, https://github.com/SuaveIO/suave/pull/575
+let removeBuggyCorsHeader: WebPart =
+    fun ctx -> async {
+        let finalHeaders =
+            ctx.response.headers
+            |> List.filter (fun (k,v) -> k <> "Access-Control-Allow-Credentials" || v = "True")
+            |> List.map(fun (k,v) -> if k = "Access-Control-Allow-Credentials" then k,v.ToLower() else k,v)
+        return Some({ ctx with response = { ctx.response with headers = finalHeaders } })
+    }
 
-    let handshakePart ctx = async {
+
+// Adapted from https://github.com/socketio/socket.io/pull/1333
+let disableXSSProtectionForIE: WebPart =
+    warbler (fun ctx ->
+        let ua = ctx |> Headers.getFirstHeader "User-Agent"
+        match ua with
+        | Some(ua) when ua.Contains(";MSIE") || ua.Contains("Trident/") ->
+            Writers.setHeader "X-XSS-Protection" "0"
+        | _ -> succeed
+    )
+
+let setIoCookie config value : WebPart =
+    warbler(fun _ ->
+        match config.CookieName with
+        | Some(cookieName) ->
+            let cookie =
+                { HttpCookie.empty with
+                    name = cookieName
+                    value = value
+                    path = config.CookiePath
+                    httpOnly = match config.CookiePath with | Some _ -> config.CookieHttpOnly | None -> false
+                }
+            Cookie.setCookie cookie
+        | None -> 
+            succeed
+    )
+    
+
+let serveSocketIo (config: EngineIoConfig) =
+    let respondPayload payload engineContext: WebPart = 
+        if engineContext.SupportsBinary then
+            Writers.setHeader "Content-Type" "text/plain; charset=UTF-8"
+                >=> Successful.OK (payload |> Payload.encodeToString)
+        else
+            Writers.setHeader "Content-Type" "application/octet-stream"
+                >=> Successful.ok (payload |> Payload.encodeToBinary |> Segment.toArray)
+
+    let handshakePart: WebPart = fun ctx -> async {
         let! sid = config.getHandshakeSid ctx
         let handshake = {
             Sid = sid;
@@ -77,13 +126,14 @@ let serveSocketIo (config: EngineIoConfig) =
             PingInterval = int config.PingInterval.TotalMilliseconds }
         let payload = Payload([Open(handshake)])
         let engineContext = EngineIoContext.FromHttp ctx
-        let ctx = { ctx with response = { ctx.response with headers = (ctx.response.headers |> List.map(fun (k,v) -> if k = "Access-Control-Allow-Credentials" then k,v.ToLower() else k,v)) } }
-        return! respondPayload payload engineContext ctx
+        let pipeline = setIoCookie config sid >=> respondPayload payload engineContext
+        return! pipeline ctx
     }
         
-    cors config.CORSConfig >=> choose [
-        handshakePart
-    ]
+    choose [ handshakePart ]
+        >=> cors config.CORSConfig
+        >=> removeBuggyCorsHeader
+        >=> disableXSSProtectionForIE
 
 [<EntryPoint>]
 let main argv = 
