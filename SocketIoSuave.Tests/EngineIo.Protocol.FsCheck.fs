@@ -7,7 +7,7 @@ open SocketIoSuave.EngineIo.Protocol
 
 let binaryPacketRoundtrip packet =
     let encoded = packet |> PacketMessage.encodeToBinary
-    let isBinary = packet |> PacketMessage.getData |> Data.requireBinary
+    let isBinary = packet |> PacketMessage.getData |> PacketContent.requireBinary
     encoded |> PacketMessage.decodeFromBinary isBinary
 
 let stringPacketRoundtrip packet =
@@ -19,13 +19,13 @@ let genSegment = Gen.map Segment.ofArray genArray
 
 let dataEqual d1 d2 =
     match d1, d2 with
-    | String(s1), String(s2) -> s1 = s2
+    | TextPacket(s1), TextPacket(s2) -> s1 = s2
     | Empty, Empty -> true
-    | String(s), Empty -> isNull s || s = "" 
-    | Empty, String(s) -> isNull s || s = "" 
-    | Binary(d), Empty -> d.Count = 0
-    | Empty, Binary(d) -> d.Count = 0
-    | Binary(d1), Binary(d2) -> Array.equalsConstantTime (d1 |> Segment.toArray) (d2 |> Segment.toArray)
+    | TextPacket(s), Empty -> isNull s || s = "" 
+    | Empty, TextPacket(s) -> isNull s || s = "" 
+    | BinaryPacket(d), Empty -> d.Count = 0
+    | Empty, BinaryPacket(d) -> d.Count = 0
+    | BinaryPacket(d1), BinaryPacket(d2) -> Array.equalsConstantTime (d1 |> Segment.toArray) (d2 |> Segment.toArray)
     | _ -> false
 
 let packetEqual p1 p2 =

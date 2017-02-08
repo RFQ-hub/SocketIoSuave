@@ -33,22 +33,22 @@ let tests =
                 testPacketToString (Close) "1" "close"
 
             testCase "ping" <| fun _ ->
-                testPacketToString (Ping(String("probe"))) "2probe" "ping"
+                testPacketToString (Ping(TextPacket("probe"))) "2probe" "ping"
 
             testCase "ping (binary)" <| fun _ ->
-                testPacketToString (Ping(Binary([|1uy;2uy;3uy|] |> Segment.ofArray))) "b2AQID" "ping (binary)"
+                testPacketToString (Ping(BinaryPacket([|1uy;2uy;3uy|] |> Segment.ofArray))) "b2AQID" "ping (binary)"
 
             testCase "pong" <| fun _ ->
-                testPacketToString (Pong(String("probe"))) "3probe" "pong"
+                testPacketToString (Pong(TextPacket("probe"))) "3probe" "pong"
 
             testCase "pong (binary)" <| fun _ ->
-                testPacketToString (Pong(Binary([|1uy;2uy;3uy|] |> Segment.ofArray))) "b3AQID" "pong (binary)"
+                testPacketToString (Pong(BinaryPacket([|1uy;2uy;3uy|] |> Segment.ofArray))) "b3AQID" "pong (binary)"
 
             testCase "message" <| fun _ ->
-                testPacketToString (Message(String("Hello world"))) "4Hello world" "message"
+                testPacketToString (Message(TextPacket("Hello world"))) "4Hello world" "message"
 
             testCase "message (binary)" <| fun _ ->
-                testPacketToString (Message(Binary([|1uy;2uy;3uy|] |> Segment.ofArray))) "b4AQID" "message (binary)"
+                testPacketToString (Message(BinaryPacket([|1uy;2uy;3uy|] |> Segment.ofArray))) "b4AQID" "message (binary)"
 
             testCase "close" <| fun _ ->
                 testPacketToString (Upgrade) "5" "close"
@@ -67,22 +67,22 @@ let tests =
                 testPacketToBinary (Close) [49] "close"
 
             testCase "ping" <| fun _ ->
-                testPacketToBinary (Ping(String("probe"))) ([50] |> appendUtf8 "probe") "ping"
+                testPacketToBinary (Ping(TextPacket("probe"))) ([50] |> appendUtf8 "probe") "ping"
 
             testCase "ping (binary)" <| fun _ ->
-                testPacketToBinary (Ping(Binary([|1uy;2uy;3uy|] |> Segment.ofArray))) [2;1;2;3] "ping (binary)"
+                testPacketToBinary (Ping(BinaryPacket([|1uy;2uy;3uy|] |> Segment.ofArray))) [2;1;2;3] "ping (binary)"
 
             testCase "pong" <| fun _ ->
-                testPacketToBinary (Pong(String("probe"))) ([51] |> appendUtf8 "probe") "ping"
+                testPacketToBinary (Pong(TextPacket("probe"))) ([51] |> appendUtf8 "probe") "ping"
 
             testCase "pong (binary)" <| fun _ ->
-                testPacketToBinary (Pong(Binary([|1uy;2uy;3uy|] |> Segment.ofArray))) [3;1;2;3] "pong (binary)"
+                testPacketToBinary (Pong(BinaryPacket([|1uy;2uy;3uy|] |> Segment.ofArray))) [3;1;2;3] "pong (binary)"
 
             testCase "message" <| fun _ ->
-                testPacketToBinary (Message(String("Hello world"))) ([52] |> appendUtf8 "Hello world") "message"
+                testPacketToBinary (Message(TextPacket("Hello world"))) ([52] |> appendUtf8 "Hello world") "message"
 
             testCase "message (binary)" <| fun _ ->
-                testPacketToBinary (Message(Binary([|1uy;2uy;3uy|] |> Segment.ofArray))) [4;1;2;3] "message (binary)"
+                testPacketToBinary (Message(BinaryPacket([|1uy;2uy;3uy|] |> Segment.ofArray))) [4;1;2;3] "message (binary)"
 
             testCase "upgrade" <| fun _ ->
                 testPacketToBinary (Upgrade) [53] "upgrade"
@@ -95,11 +95,11 @@ let tests =
             testCase "empty" <| fun _ ->
                 testPayloadToString [] "0:" "empty"
             testCase "single message" <| fun _ ->
-                testPayloadToString [Message(String("Hello world"))] "12:4Hello world" "message"
+                testPayloadToString [Message(TextPacket("Hello world"))] "12:4Hello world" "message"
             testCase "two messages" <| fun _ ->
-                testPayloadToString [Message(String("Hello"));Message(String("world"))] "6:4Hello6:4world" "2 messages"
+                testPayloadToString [Message(TextPacket("Hello"));Message(TextPacket("world"))] "6:4Hello6:4world" "2 messages"
             testCase "single binary message" <| fun _ ->
-                testPayloadToString [Message(Binary([|1uy;2uy;3uy|] |> Segment.ofArray))] "6:b4AQID" "message"
+                testPayloadToString [Message(BinaryPacket([|1uy;2uy;3uy|] |> Segment.ofArray))] "6:b4AQID" "message"
         ]
 
         testList "payload to binary" [
@@ -108,22 +108,22 @@ let tests =
             testCase "close" <| fun _ ->
                 testPayloadToBinary [Close] [0x00; 0x01; 0xFF; 0x31] "[close]"
             testCase "ping" <| fun _ ->
-                testPayloadToBinary [Ping(String("abc"))] [0x00; 0x04; 0xff; 0x32; 0x61; 0x62; 0x63] "[ping text]"
+                testPayloadToBinary [Ping(TextPacket("abc"))] [0x00; 0x04; 0xff; 0x32; 0x61; 0x62; 0x63] "[ping text]"
             testCase "ping (binary)" <| fun _ ->
-                testPayloadToBinary [Ping(Binary([|1uy;2uy;3uy|] |> Segment.ofArray))] [0x01; 0x04; 0xff; 2; 1; 2; 3] "[ping binary]"
+                testPayloadToBinary [Ping(BinaryPacket([|1uy;2uy;3uy|] |> Segment.ofArray))] [0x01; 0x04; 0xff; 2; 1; 2; 3] "[ping binary]"
             testCase "pong" <| fun _ ->
-                testPayloadToBinary [Pong(String("abc"))] [0x00; 0x04; 0xff; 0x33; 0x61; 0x62; 0x63] "[pong text]"
+                testPayloadToBinary [Pong(TextPacket("abc"))] [0x00; 0x04; 0xff; 0x33; 0x61; 0x62; 0x63] "[pong text]"
             testCase "pong (binary)" <| fun _ ->
-                testPayloadToBinary [Pong(Binary([|1uy;2uy;3uy|] |> Segment.ofArray))] [0x01; 0x04; 0xff; 3; 1; 2; 3] "[pong binary]"
+                testPayloadToBinary [Pong(BinaryPacket([|1uy;2uy;3uy|] |> Segment.ofArray))] [0x01; 0x04; 0xff; 3; 1; 2; 3] "[pong binary]"
             testCase "message" <| fun _ ->
-                testPayloadToBinary [Message(String("abc"))] [0x00; 0x04; 0xff; 0x34; 0x61; 0x62; 0x63] "[message text]"
+                testPayloadToBinary [Message(TextPacket("abc"))] [0x00; 0x04; 0xff; 0x34; 0x61; 0x62; 0x63] "[message text]"
             testCase "message (binary)" <| fun _ ->
-                testPayloadToBinary [Message(Binary([|1uy;2uy;3uy|] |> Segment.ofArray))] [0x01; 0x04; 0xff; 4; 1; 2; 3] "[message binary]"
+                testPayloadToBinary [Message(BinaryPacket([|1uy;2uy;3uy|] |> Segment.ofArray))] [0x01; 0x04; 0xff; 4; 1; 2; 3] "[message binary]"
             testCase "upgrade" <| fun _ ->
                 testPayloadToBinary [Upgrade] [0x00; 0x01; 0xFF; 0x35] "[upgrade]"
             testCase "noop" <| fun _ ->
                 testPayloadToBinary [Noop] [0x00; 0x01; 0xFF; 0x36] "[noop]"
             testCase "multiple" <| fun _ ->
-                testPayloadToBinary [Noop; Message(Binary([|1uy;2uy;3uy|] |> Segment.ofArray)); Close] [0x00; 0x01; 0xFF; 0x36; 0x01; 0x04; 0xff; 4; 1; 2; 3; 0x00; 0x01; 0xFF; 0x31] "[noop;message binary;close]"
+                testPayloadToBinary [Noop; Message(BinaryPacket([|1uy;2uy;3uy|] |> Segment.ofArray)); Close] [0x00; 0x01; 0xFF; 0x36; 0x01; 0x04; 0xff; 4; 1; 2; 3; 0x00; 0x01; 0xFF; 0x31] "[noop;message binary;close]"
         ]
     ]
