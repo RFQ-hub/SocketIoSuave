@@ -4,12 +4,15 @@ open Suave.CORS
 open Suave.Operators
 open SocketIoSuave.EngineIo.Protocol
 open SocketIoSuave
+open System.Security.Cryptography
+open System.Threading
 
 let handlePacket (packet: PacketMessage) =
     printfn "Received: %A" packet
 
 type EngineIoConfig =
     {
+        Path: string
         Upgrades: string[] // "websocket"
         CORSConfig: CORSConfig
         PingTimeout: TimeSpan
@@ -17,13 +20,14 @@ type EngineIoConfig =
         CookieName: string option
         CookiePath: string option
         CookieHttpOnly: bool
-        getHandshakeSid: HttpContext -> Async<string>
+        RandomNumberGenerator: RandomNumberGenerator
         onPacket: HttpContext -> PacketMessage -> Async<unit>
         getPacket: HttpContext -> Async<PacketMessage option>
         getPayload: HttpContext -> Async<Payload option>
     }
 
     with static member empty = {
+            Path = "/engine.io"
             CookieName = Some "io"
             CookiePath = Some "/"
             CookieHttpOnly = false
@@ -35,7 +39,7 @@ type EngineIoConfig =
                     allowCookies = false }
             PingTimeout = TimeSpan.FromSeconds(60.)
             PingInterval = TimeSpan.FromSeconds(25.)
-            getHandshakeSid = (fun _ -> async { return Guid.NewGuid().ToString() })
+            RandomNumberGenerator = RandomNumberGenerator.Create()
             onPacket = (fun _ _ -> async { return () })
             getPacket = (fun _ -> async { return None })
             getPayload = (fun _ -> async { return None })
@@ -106,9 +110,31 @@ let setIoCookie config value : WebPart =
         | None -> 
             succeed
     )
-    
 
-let serveSocketIo (config: EngineIoConfig) =
+type SocketId = SocketId of string
+with
+    override x.ToString() = match x with | SocketId s -> s
+
+type Socket =
+    {
+        Id: SocketId
+        Transport: Transport
+        IncomingMessages: MailboxProcessor<PacketMessage>
+        OutgoingMessages: MailboxProcessor<PacketMessage>
+    }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Socket =
+    /// Send a packet to the client. This is a non-blocking write.
+    let send msg socket = socket.OutgoingMessages.Post msg
+
+type EngineIoServer =
+    {
+        OpenSessions: Map<SocketId, Socket>
+    }
+
+let serveEngineIo (config: EngineIoConfig) =
+    let idGenerator = Base64Id.create config.RandomNumberGenerator
     let respondPayload payload engineContext: WebPart = 
         if engineContext.SupportsBinary then
             Writers.setHeader "Content-Type" "text/plain; charset=UTF-8"
@@ -117,8 +143,8 @@ let serveSocketIo (config: EngineIoConfig) =
             Writers.setHeader "Content-Type" "application/octet-stream"
                 >=> Successful.ok (payload |> Payload.encodeToBinary |> Segment.toArray)
 
-    let handshakePart: WebPart = fun ctx -> async {
-        let! sid = config.getHandshakeSid ctx
+    let mainPart: WebPart = fun ctx -> async {
+        let sid = idGenerator ()
         let handshake = {
             Sid = sid;
             Upgrades = config.Upgrades;
@@ -130,17 +156,20 @@ let serveSocketIo (config: EngineIoConfig) =
         return! pipeline ctx
     }
         
-    choose [ handshakePart ]
-        >=> cors config.CORSConfig
-        >=> removeBuggyCorsHeader
-        >=> disableXSSProtectionForIE
+    choose [
+        Filters.pathStarts config.Path
+            >=> mainPart
+            >=> cors config.CORSConfig
+            >=> removeBuggyCorsHeader
+            >=> disableXSSProtectionForIE
+    ]
 
 [<EntryPoint>]
 let main argv = 
     let conf = { EngineIoConfig.empty with Upgrades = Array.empty }
     let app =
         choose [
-            Filters.pathStarts "/socket.io/" >=> (serveSocketIo EngineIoConfig.empty)
+            serveEngineIo EngineIoConfig.empty
             Successful.OK "Hello World!"
         ]
     startWebServer defaultConfig app

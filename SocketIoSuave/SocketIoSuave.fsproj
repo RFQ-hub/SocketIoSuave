@@ -46,7 +46,9 @@
   <ItemGroup>
     <Compile Include="AssemblyInfo.fs" />
     <Compile Include="Segment.fs" />
+    <Compile Include="Base64Id.fs" />
     <Compile Include="EngineIo.Protocol.fs" />
+    <Compile Include="EngineIo.Protocol.Parsing.fs" />
     <Compile Include="EngineIo.Engine.fs" />
     <Compile Include="Program.fs" />
     <None Include="App.config" />
