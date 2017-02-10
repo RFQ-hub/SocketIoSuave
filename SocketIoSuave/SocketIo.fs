@@ -99,6 +99,7 @@ module Protocol =
             match token.Type with
             | JTokenType.Bytes -> true
             | JTokenType.Object ->  token :?> JObject |> Seq.exists containsBytes
+            | JTokenType.Property -> containsBytes ((token :?> JProperty).Value)
             | JTokenType.Array -> token :?> JArray |> Seq.exists containsBytes
             | _ -> false
 
@@ -129,7 +130,7 @@ module Protocol =
                     let key = pair.Key
                     let value = pair.Value
                     if key = "_placeholder" then
-                        failwith "Source JSON can't contain a '_placeholder' property"
+                        invalidArg "token" "Source JSON can't contain a '_placeholder' property"
                     let newValue, newBinaryData = deconstructJson value currentBinaryData
                     result.[key] <- newValue
                     currentBinaryData <- newBinaryData
