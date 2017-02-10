@@ -148,27 +148,7 @@ let rec expectJTokenEquals (t1: JToken) (t2: JToken) ignoreBinary=
 [<Tests>]
 let properties =
     testList "SocketIo.Protocol.FsCheck" [
-        testCase "data ordering in binary packet" <| fun _ ->
-            let encoded = PacketEncoder.encode {
-                Type = PacketType.BinaryAck
-                Data = [ JValue(1); JValue(2)]
-                Namespace = "/"
-                EventId = None
-            }
-            Expect.equal encoded [PacketContent.TextPacket "60-[1,2]"] ""
-
-        testCase "data ordering in text packet" <| fun _ ->
-            let encoded = PacketEncoder.encode {
-                Type = PacketType.Ack
-                Data = [ JValue(1); JValue(2)]
-                Namespace = "/"
-                EventId = None
-            }
-            Expect.equal encoded [PacketContent.TextPacket "3[1,2]"] ""
-
-        // Infinite loop: ftestPropertyWithConfig (1413405593,296264514)
-        // ftestPropertyWithConfig (1636969033,296264637)
-        ftestPropertyWithConfig (1413405593,296264514) config "roundtrip" <| fun p1 ->
+        testPropertyWithConfig config "roundtrip" <| fun p1 ->
             try
                 let content = PacketEncoder.encode p1
                 let packets, state =
@@ -198,8 +178,8 @@ let properties =
                         
                 | _ -> false
             with 
-            | :? ArgumentException as ex when ex.Message.Contains("JSON contains binary data") ->
-                not (PacketType.isBinary p1.Type)
+            | :? ArgumentException as ex when ex.Message.Contains("Unexpected packet type for binary deconstruction") ->
+                p1.Type <> PacketType.Ack && p1.Type <> PacketType.Event
             | :? ArgumentException as ex when ex.Message.Contains("_placeholder") ->
-                PacketType.isBinary p1.Type
+                PacketEncoder.tokensContainsBytes p1.Data
     ]

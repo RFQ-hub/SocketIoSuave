@@ -1,4 +1,4 @@
-﻿module SocketIoSuave.Segment
+﻿module internal SocketIoSuave.Segment
 
 open System
 

@@ -6,15 +6,15 @@ open System.Text
 open Newtonsoft.Json
 open System
 
+/// Type of a socket.io packet
 type PacketType =
     | Connect
     | Disconnect
     | Event
     | Ack
     | Error
-    | BinaryEvent
-    | BinaryAck
 
+/// A socket.io packet
 type Packet =
     {
         Type: PacketType
@@ -23,34 +23,27 @@ type Packet =
         Data: JToken list
     }
 
+/// socket.io protocol encoding and decoding
 module Protocol =
     type PacketContent = SocketIoSuave.EngineIo.Protocol.PacketContent
     type ByteSegment = System.ArraySegment<byte>
 
+    type RawPacketType =
+        | Connect
+        | Disconnect
+        | Event
+        | Ack
+        | Error
+        | BinaryEvent
+        | BinaryAck
+
     type RawPacket =
         {
-            Type: PacketType
+            Type: RawPacketType
             Namespace: string option
             EventId: int option
             Data: JToken list
             Attachments: int option
-        }
-
-    let toRaw (packet: Packet) =
-        {
-            Type = packet.Type
-            Namespace = Some (packet.Namespace)
-            EventId = packet.EventId
-            Data = packet.Data
-            Attachments = None
-        }
-
-    let fromRaw (packet: RawPacket) : Packet =
-        {
-            Type = packet.Type
-            Namespace = match packet.Namespace with | None -> "/" | Some ns -> ns
-            EventId = packet.EventId
-            Data = packet.Data
         }
 
     type PartialPacket =
@@ -60,7 +53,7 @@ module Protocol =
         }
 
     [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
-    module PacketType =
+    module RawPacketType =
         let toTypeId = function
             | Connect -> 0uy
             | Disconnect -> 1uy
@@ -85,6 +78,39 @@ module Protocol =
             | BinaryAck -> true
             | _ -> false
 
+        let fromPacketType = function
+            | PacketType.Connect -> Connect
+            | PacketType.Disconnect -> Disconnect
+            | PacketType.Event -> Event
+            | PacketType.Ack -> Ack
+            | PacketType.Error -> Error
+
+        let toPacketType = function
+            | Connect -> PacketType.Connect
+            | Disconnect -> PacketType.Disconnect
+            | Event -> PacketType.Event
+            | BinaryEvent -> PacketType.Event
+            | Ack -> PacketType.Ack
+            | BinaryAck -> PacketType.Ack
+            | Error ->PacketType. Error
+
+    let private toRaw (packet: Packet) =
+        {
+            Type = RawPacketType.fromPacketType packet.Type
+            Namespace = Some (packet.Namespace)
+            EventId = packet.EventId
+            Data = packet.Data
+            Attachments = None
+        }
+
+    let private fromRaw (packet: RawPacket) : Packet =
+        {
+            Type = RawPacketType.toPacketType packet.Type
+            Namespace = match packet.Namespace with | None -> "/" | Some ns -> ns
+            EventId = packet.EventId
+            Data = packet.Data
+        }
+
     [<RequireQualifiedAccess>]
     module PacketEncoder =
         open System.Diagnostics
@@ -95,19 +121,21 @@ module Protocol =
             placeholder.Add("num", JValue num)
             placeholder
 
-        let rec private containsBytes (token: JToken) : bool =
+        let rec private tokenContainsBytes (token: JToken) : bool =
             match token.Type with
             | JTokenType.Bytes -> true
-            | JTokenType.Object ->  token :?> JObject |> Seq.exists containsBytes
-            | JTokenType.Property -> containsBytes ((token :?> JProperty).Value)
-            | JTokenType.Array -> token :?> JArray |> Seq.exists containsBytes
+            | JTokenType.Object ->  token :?> JObject |> Seq.exists tokenContainsBytes
+            | JTokenType.Property -> tokenContainsBytes ((token :?> JProperty).Value)
+            | JTokenType.Array -> token :?> JArray |> Seq.exists tokenContainsBytes
             | _ -> false
+
+        let internal tokensContainsBytes : JToken seq -> bool = Seq.exists tokenContainsBytes
 
         [<Sealed>]
         type private ConditionalChecker private() =
             [<Conditional("DEBUG")>]
             static member ThrowIfContainsBytes (token: JToken): unit =
-                if containsBytes token then 
+                if tokenContainsBytes token then 
                     invalidArg "token" "JSON contains binary data"
 
             [<Conditional("DEBUG")>]
@@ -147,28 +175,38 @@ module Protocol =
             | _ -> token, binaryData
 
         let private deconstruct (packet: RawPacket) : PartialPacket =
-            let finalTokens, finalBinaryData =
+            // Remove binary content from the JSON and place it in attachments
+            let finalTokens, attachments =
                 packet.Data
                 |> List.fold
-                    (fun (tokens, binaryData) originalToken ->
-                        let newToken, newBinaryData = deconstructJson originalToken binaryData
-                        (newToken::tokens), newBinaryData)
+                    (fun (tokens, attachments) originalToken ->
+                        let newToken, newAttachments = deconstructJson originalToken attachments
+                        (newToken::tokens), newAttachments)
                     ([], [])
 
+            // Deduce the 'wire' type
+            let realRawType  =
+                match packet.Type with
+                | Ack -> BinaryAck
+                | Event -> BinaryEvent
+                | _ -> invalidArg "packet" (sprintf "Unexpected packet type for binary deconstruction: %A" packet.Type)
+
+            // Build the final packet as will be sent on the wire and the attachments
             {
                 Packet =
                     { packet with
+                        Type = realRawType
                         Data = finalTokens |> List.rev
-                        Attachments = Some finalBinaryData.Length
+                        Attachments = Some attachments.Length
                     }
-                Attachments = finalBinaryData |> List.rev
+                Attachments = attachments |> List.rev
             }
 
         let private encodeToString (packet: RawPacket) : string =
             let builder = StringBuilder()
-            builder.Append(PacketType.toTypeId packet.Type) |> ignore
+            builder.Append(RawPacketType.toTypeId packet.Type) |> ignore
 
-            if PacketType.isBinary packet.Type then
+            if RawPacketType.isBinary packet.Type then
                 let attachments = defaultArg packet.Attachments 0
                 if attachments < 0 then
                     failwith "Invalid number of attachments"
@@ -208,7 +246,7 @@ module Protocol =
             (PacketContent.TextPacket stringPart) :: (deconstructed.Attachments |> List.map PacketContent.BinaryPacket)
 
         let encode (packet: Packet) : PacketContent list =
-            if PacketType.isBinary packet.Type then
+            if tokensContainsBytes packet.Data then
                 encodeToBinary (toRaw packet)
             else
                 let str = encodeToString (toRaw packet)
@@ -262,10 +300,10 @@ module Protocol =
             let mutable i = 0
             let rawTypeId = Byte.Parse(string s.[i])
             i <- i + 1
-            let typeId = PacketType.fromTypeId rawTypeId
+            let typeId = RawPacketType.fromTypeId rawTypeId
             let buf = StringBuilder(20)
             let attachments = 
-                if PacketType.isBinary typeId then
+                if RawPacketType.isBinary typeId then
                     while i < s.Length && s.[i] <> '-'  do
                         buf.Append(s.[i]) |> ignore
                         i <- i + 1
