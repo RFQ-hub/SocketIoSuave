@@ -96,7 +96,7 @@ module Protocol =
         let rec private deconstructJson (token: JToken) (binaryData: ByteSegment list) : JToken * ByteSegment list =
             match token.Type with
             | JTokenType.Bytes ->
-                let bytes = (JValue token).Value :?> byte[] |> Segment.ofArray
+                let bytes = (token :?> JValue).Value :?> byte[] |> Segment.ofArray
                 let placeholder = mkPlaceholder binaryData.Length
                 placeholder :> JToken, bytes :: binaryData
             | JTokenType.Object -> 
@@ -153,7 +153,7 @@ module Protocol =
 
             match packet.Namespace with
             | Some ns when not (System.String.IsNullOrEmpty(ns)) && ns <> "/" ->
-                if ns.[0] <> '/' || ns.IndexOf(',') <> 0 then
+                if ns.[0] <> '/' || ns.IndexOf(',') <> -1 then
                     failwith "Invalid namespace"
                 builder.Append(ns) |> ignore
                 builder.Append(',') |> ignore
@@ -212,7 +212,7 @@ module Protocol =
                     obj :> JToken
             | JTokenType.Array ->
                 let arr = token :?> JArray
-                for i in [0..arr.Count] do
+                for i in [0..arr.Count-1] do
                     arr.[i] <- reconstructJson (arr.[i]) binaryData
                 arr :> JToken
             | _ -> token
@@ -237,7 +237,7 @@ module Protocol =
             let buf = StringBuilder(20)
             let attachments = 
                 if PacketType.isBinary typeId then
-                    while i <= s.Length && s.[i] <> '-'  do
+                    while i < s.Length && s.[i] <> '-'  do
                         buf.Append(s.[i]) |> ignore
                         i <- i + 1
                     if i = s.Length then
@@ -251,7 +251,7 @@ module Protocol =
 
             let ns =
                 if s.[i] = '/' then
-                    while i <= s.Length && s.[i] <> ','  do
+                    while i < s.Length && s.[i] <> ','  do
                         buf.Append(s.[i]) |> ignore
                         i <- i + 1
                     if i = s.Length then
@@ -264,7 +264,7 @@ module Protocol =
                     None
 
             let eventId =
-                while i <= s.Length && isNumber (s.[i])  do
+                while i < s.Length && isNumber (s.[i])  do
                     buf.Append(s.[i]) |> ignore
                     i <- i + 1
                 if buf.Length = 0 then
@@ -273,7 +273,7 @@ module Protocol =
                     Some (Int32.Parse(buf.ToString()))
 
             let data =
-                if i <= s.Length then
+                if i < s.Length then
                     let jArray = JArray.Parse(s.Substring(i))
                     jArray |> Seq.toList
                 else
@@ -295,13 +295,19 @@ module Protocol =
             | PacketContent.TextPacket s ->
                 match state.PartialPacket with
                 | Some _ -> failwith "boom, missing packets ???"
-                | None -> Some (fromRaw (decodeString s)), state
+                | None ->
+                    let raw = decodeString s
+                    match raw.Attachments with
+                    | Some(attachments) when attachments > 0 ->
+                        let partial = { Packet = raw; Attachments = [] }
+                        None, { state with PartialPacket = Some partial }
+                    | _ -> Some (fromRaw raw), state
             | PacketContent.BinaryPacket b ->
                 match state.PartialPacket with
                 | None -> failwith "Why binary, not expected"
                 | Some partial ->
                     let partial = { partial with Attachments = b :: partial.Attachments }
                     if partial.Attachments.Length = (defaultArg partial.Packet.Attachments 0) then
-                        Some(reconstruct partial), empty
+                        Some(reconstruct partial), { state with PartialPacket = None }
                     else
                         None, { state with PartialPacket = Some partial }

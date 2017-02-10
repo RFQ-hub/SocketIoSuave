@@ -6,6 +6,7 @@ open SocketIoSuave
 open SocketIoSuave.SocketIo
 open Newtonsoft.Json.Linq
 open System
+open System.Collections.Generic
 
 let genByteArray = Gen.arrayOf Arb.generate<byte>
 let genSegment = Gen.map Segment.ofArray (genByteArray |> Gen.filter (isNull >> not))
@@ -17,8 +18,8 @@ let genJValue =
             Arb.generate<UInt32> |> Gen.map JValue
             Arb.generate<bool> |> Gen.map JValue
             Arb.generate<char> |> Gen.map JValue
-            Arb.generate<DateTime> |> Gen.map JValue
-            Arb.generate<DateTimeOffset> |> Gen.map JValue
+            //Arb.generate<DateTime> |> Gen.map JValue
+            //Arb.generate<DateTimeOffset> |> Gen.map JValue
             Arb.generate<Decimal> |> Gen.map JValue
             Arb.generate<double> |> Gen.map JValue
             Arb.generate<Guid> |> Gen.map JValue
@@ -59,14 +60,14 @@ and genJObject' s =
     | 0 -> Gen.constant (JObject())
     | n when n > 0 ->
         gen {
-            let! key = Arb.generate<string>
+            let! key = Arb.generate<string> |> Gen.filter (isNull >> not)
             let! value = genJToken' n
             return key, value
         }
-        |> Gen.arrayOf
+        |> Gen.listOf
         |> Gen.map(fun arr ->
             let result = JObject()
-            for (key, value) in arr do
+            for (key, value) in List.distinctBy fst arr do
                 result.Add(key, value)
             result)
     | _ -> invalidArg "s" "Only positive arguments are allowed"
@@ -75,7 +76,7 @@ let genJToken = Gen.sized genJToken'
 let genJArray = Gen.sized genJArray'
 let genJObject = Gen.sized genJObject'
 
-let genString (charGen: Gen<char>) = Gen.map string (Gen.arrayOf charGen)
+let genString (charGen: Gen<char>) = Gen.arrayOf charGen |> Gen.map System.String
 let genOrNull gen = Gen.oneof [ gen; Gen.constant null]
 
 let genValidPacket = gen {
@@ -98,6 +99,42 @@ type ProtocolGenerators =
     static member Packet() = Arb.fromGen genValidPacket
 
 let config = { FsCheck.Config.Default with Arbitrary = [typeof<ProtocolGenerators>] }
+
+let objTuples (obj: JObject) = [ for pair in (obj :> IEnumerable<KeyValuePair<string,JToken>>) do yield pair.Key, pair.Value]
+
+let rec jTokenEquals (t1: JToken) (t2: JToken) =
+    match t1.Type, t2.Type with
+    | JTokenType.Array, JTokenType.Array ->
+        let b1 = (t1 :?> JArray)
+        let b2 = (t1 :?> JArray)
+        if b1.Count <> b2.Count then
+            false
+        else
+            seq { for i in [0..b1.Count-1] do yield jTokenEquals (b1.[i]) (b2.[i])}
+            |> Seq.forall id
+    | JTokenType.Bytes, JTokenType.Bytes ->
+        let b1 = (t1 :?> JValue).Value :?> byte[]
+        let b2 = (t1 :?> JValue).Value :?> byte[]
+        Array.equalsConstantTime b1 b2
+    | JTokenType.Object, JTokenType.Object ->
+        let o1 = t1 :?> JObject
+        let o2 = t2 :?> JObject
+        if o1.Count <> o2.Count then
+            false
+        else
+            let o1 = objTuples o1 |> Seq.sortBy fst
+            let o2 = objTuples o2 |> Seq.sortBy fst
+            o1
+                |> Seq.zip o2
+                |> Seq.map(fun ((k1,v1),(k2,v2)) -> k1 = k2 && jTokenEquals v1 v2)
+                |> Seq.forall id
+    | JTokenType.Float, JTokenType.Float ->
+        let f1 = (t1 :?> JValue).Value :?> float
+        let f2 = (t1 :?> JValue).Value :?> float
+        abs (f1-f2) < 1e-5
+    | x, y when x = y -> JToken.DeepEquals(t1, t2)
+    | _, _ -> false
+
 
 [<Tests>]
 let properties =
@@ -143,7 +180,15 @@ let properties =
                 else if p1.Data.Length <> p2.Data.Length then
                     false
                 else
-                    let eq = p1.Data |> Seq.zip p2.Data |> Seq.forall (fun (t1, t2) -> JToken.DeepEquals(t1, t2))
+                    let eq =
+                        p1.Data
+                        |> Seq.zip p2.Data
+                        |> Seq.forall (fun (t1, t2) ->
+                            let teq = jTokenEquals t1 t2
+                            if teq then
+                                true
+                            else
+                                false)
                     eq
                         
             | _ -> false
