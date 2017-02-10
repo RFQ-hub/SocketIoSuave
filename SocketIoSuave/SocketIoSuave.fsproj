@@ -50,6 +50,7 @@
     <Compile Include="EngineIo.Protocol.fs" />
     <Compile Include="EngineIo.Protocol.Parsing.fs" />
     <Compile Include="EngineIo.Engine.fs" />
+    <Compile Include="SocketIo.fs" />
     <Compile Include="Program.fs" />
     <None Include="App.config" />
     <None Include="paket.references" />

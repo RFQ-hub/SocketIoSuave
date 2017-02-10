@@ -55,11 +55,7 @@ let config = { FsCheck.Config.Default with Arbitrary = [typeof<ProtocolGenerator
 
 [<Tests>]
 let properties =
-    testList "Protocol.FsCheck" [
-        testCase "xxx" <| fun _ ->
-            let x = [|0uy;1uy;255uy;49uy|] |> Segment.ofArray
-            let p = Payload.decodeFromBinary x
-            p |> ignore
+    testList "EngineIo.Protocol.FsCheck" [
         testPropertyWithConfig config "binary packet roundtrip" <| fun p1 ->
             let p2 = p1 |> binaryPacketRoundtrip
             packetEqual p1 p2
