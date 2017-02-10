@@ -35,6 +35,8 @@ let genJValue (valueGenerators: Gen<JValue> seq) = Gen.oneof valueGenerators
 
 let mapGenToToken<'t when 't :> JToken> = Gen.map (fun (x: 't) -> x:> JToken)
 
+let reduceSize n = (n|>float|>sqrt|>int) - 1
+
 let rec genJToken' valueGenerators s =
     match s with
     | 0 -> mapGenToToken (genJValue valueGenerators)
@@ -42,8 +44,8 @@ let rec genJToken' valueGenerators s =
         Gen.oneof
             [
                 mapGenToToken (genJValue valueGenerators)
-                mapGenToToken (genJArray' valueGenerators (n/2))
-                mapGenToToken (genJObject' valueGenerators (n/2))
+                mapGenToToken (genJArray' valueGenerators (reduceSize n))
+                mapGenToToken (genJObject' valueGenerators (reduceSize n))
             ]
     | _ -> invalidArg "s" "Only positive arguments are allowed"
 
@@ -51,7 +53,7 @@ and genJArray' valueGenerators s =
     match s with
     | 0 -> Gen.constant (JArray())
     | n when n > 0 ->
-        genJToken' valueGenerators (n/2)
+        genJToken' valueGenerators (reduceSize n)
         |> Gen.arrayOf
         |> Gen.map JArray
     | _ -> invalidArg "s" "Only positive arguments are allowed"
@@ -62,7 +64,7 @@ and genJObject' valueGenerators s =
     | n when n > 0 ->
         gen {
             let! key = Arb.generate<string> |> Gen.filter (isNull >> not)
-            let! value = genJToken' valueGenerators (n/2)
+            let! value = genJToken' valueGenerators (reduceSize n)
             return key, value
         }
         |> Gen.listOf
@@ -101,18 +103,18 @@ type JsonGenerators =
     static member JArray() = Arb.fromGen (genJArray genSimpleJValues)
     static member JObject() = Arb.fromGen (genJObject genSimpleJValues)
 
-let config = { FsCheck.Config.Default with Arbitrary = [typeof<PacketGenerator>; typeof<JsonGenerators>] }
+let config = { FsCheck.Config.Verbose with Arbitrary = [typeof<PacketGenerator>; typeof<JsonGenerators>] }
 
 let objTuples (obj: JObject) = [ for pair in (obj :> IEnumerable<KeyValuePair<string,JToken>>) do yield pair.Key, pair.Value]
 
-let rec expectJTokenEquals (t1: JToken) (t2: JToken) =
+let rec expectJTokenEquals (t1: JToken) (t2: JToken) ignoreBinary=
     match t1.Type, t2.Type with
     | JTokenType.Array, JTokenType.Array ->
         let b1 = (t1 :?> JArray)
         let b2 = (t1 :?> JArray)
         Expect.equal (b1.Count) (b2.Count) "Same length"
         for i in [0..b1.Count-1] do
-            expectJTokenEquals (b1.[i]) (b2.[i])
+            expectJTokenEquals (b1.[i]) (b2.[i]) ignoreBinary
     | JTokenType.Bytes, JTokenType.Bytes ->
         let b1 = (t1 :?> JValue).Value :?> byte[]
         let b2 = (t1 :?> JValue).Value :?> byte[]
@@ -126,7 +128,7 @@ let rec expectJTokenEquals (t1: JToken) (t2: JToken) =
 
         for ((k1,v1),(k2,v2)) in Seq.zip o1 o2 do
             Expect.equal k1 k2 "Same key"
-            expectJTokenEquals v1 v2
+            expectJTokenEquals v1 v2 ignoreBinary
     | JTokenType.Float, JTokenType.Float ->
         let f1 = t1.Value<double>()
         let f2 = t2.Value<double>()
@@ -137,6 +139,8 @@ let rec expectJTokenEquals (t1: JToken) (t2: JToken) =
     | JTokenType.Null, JTokenType.String when isNull (t2.Value<string>()) -> ()
     | JTokenType.Bytes, JTokenType.Null when isNull (t1.Value<byte[]>()) -> ()
     | JTokenType.Null, JTokenType.Bytes when isNull (t2.Value<byte[]>()) -> ()
+    | JTokenType.Bytes, _ when ignoreBinary -> ()
+    | _, JTokenType.Bytes when ignoreBinary -> ()
     | _, _ ->
         Expect.isFalse true "Not the same type"
 
@@ -144,7 +148,7 @@ let rec expectJTokenEquals (t1: JToken) (t2: JToken) =
 [<Tests>]
 let properties =
     testList "SocketIo.Protocol.FsCheck" [
-        ftestCase "data ordering in binary packet" <| fun _ ->
+        testCase "data ordering in binary packet" <| fun _ ->
             let encoded = PacketEncoder.encode {
                 Type = PacketType.BinaryAck
                 Data = [ JValue(1); JValue(2)]
@@ -153,7 +157,7 @@ let properties =
             }
             Expect.equal encoded [PacketContent.TextPacket "60-[1,2]"] ""
 
-        ftestCase "data ordering in text packet" <| fun _ ->
+        testCase "data ordering in text packet" <| fun _ ->
             let encoded = PacketEncoder.encode {
                 Type = PacketType.Ack
                 Data = [ JValue(1); JValue(2)]
@@ -162,7 +166,9 @@ let properties =
             }
             Expect.equal encoded [PacketContent.TextPacket "3[1,2]"] ""
 
-        ftestPropertyWithConfig (1413405593,296264514) config "foo" <| fun p1 ->
+        // Infinite loop: ftestPropertyWithConfig (1413405593,296264514)
+        // ftestPropertyWithConfig (1636969033,296264637)
+        ftestPropertyWithConfig (1413405593,296264514) config "roundtrip" <| fun p1 ->
             try
                 let content = PacketEncoder.encode p1
                 let packets, state =
@@ -187,11 +193,13 @@ let properties =
                         false
                     else
                         for (t1, t2) in Seq.zip p1.Data p2.Data do
-                            expectJTokenEquals t1 t2
+                            expectJTokenEquals t1 t2 false
                         true
                         
                 | _ -> false
             with 
             | :? ArgumentException as ex when ex.Message.Contains("JSON contains binary data") ->
                 not (PacketType.isBinary p1.Type)
+            | :? ArgumentException as ex when ex.Message.Contains("_placeholder") ->
+                PacketType.isBinary p1.Type
     ]
