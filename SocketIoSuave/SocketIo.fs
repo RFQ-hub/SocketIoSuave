@@ -87,11 +87,33 @@ module Protocol =
 
     [<RequireQualifiedAccess>]
     module PacketEncoder =
+        open System.Diagnostics
+
         let inline private mkPlaceholder (num: int) : JObject =
             let placeholder = new JObject()
             placeholder.Add("_placeholder", JValue true)
             placeholder.Add("num", JValue num)
             placeholder
+
+        let rec private containsBytes (token: JToken) : bool =
+            match token.Type with
+            | JTokenType.Bytes -> true
+            | JTokenType.Object ->  token :?> JObject |> Seq.exists containsBytes
+            | JTokenType.Array -> token :?> JArray |> Seq.exists containsBytes
+            | _ -> false
+
+        [<Sealed>]
+        type private ConditionalChecker private() =
+            [<Conditional("DEBUG")>]
+            static member ThrowIfContainsBytes (token: JToken): unit =
+                if containsBytes token then 
+                    invalidArg "token" "JSON contains binary data"
+
+            [<Conditional("DEBUG")>]
+            static member ThrowIfContainsBytes (tokens: JToken list): unit =
+                for token in tokens do
+                    ConditionalChecker.ThrowIfContainsBytes token
+
 
         let rec private deconstructJson (token: JToken) (binaryData: ByteSegment list) : JToken * ByteSegment list =
             match token.Type with
@@ -102,21 +124,25 @@ module Protocol =
             | JTokenType.Object -> 
                 let obj = token :?> JObject
                 let mutable currentBinaryData = binaryData
+                let result = JObject()
                 for pair in obj do
                     let key = pair.Key
                     let value = pair.Value
+                    if key = "_placeholder" then
+                        failwith "Source JSON can't contain a '_placeholder' property"
                     let newValue, newBinaryData = deconstructJson value currentBinaryData
-                    obj.[key] <- newValue
+                    result.[key] <- newValue
                     currentBinaryData <- newBinaryData
-                obj :> JToken, currentBinaryData
+                result :> JToken, currentBinaryData
             | JTokenType.Array ->
                 let arr = token :?> JArray
                 let mutable currentBinaryData = binaryData
+                let result = JArray()
                 for i in [0..arr.Count-1] do
                     let newValue, newBinaryData = deconstructJson (arr.[i]) currentBinaryData
-                    arr.[i] <- newValue
+                    result.Add(newValue)
                     currentBinaryData <- newBinaryData
-                arr :> JToken, currentBinaryData
+                result :> JToken, currentBinaryData
             | _ -> token, binaryData
 
         let private deconstruct (packet: RawPacket) : PartialPacket =
@@ -148,6 +174,8 @@ module Protocol =
                 builder.Append(attachments) |> ignore
                 builder.Append('-') |> ignore
             else
+                ConditionalChecker.ThrowIfContainsBytes packet.Data
+                   
                 if packet.Attachments.IsSome then
                     failwith "Non binary packet with attachments"
 
@@ -250,7 +278,7 @@ module Protocol =
                     None
 
             let ns =
-                if s.[i] = '/' then
+                if i < s.Length && s.[i] = '/' then
                     while i < s.Length && s.[i] <> ','  do
                         buf.Append(s.[i]) |> ignore
                         i <- i + 1
