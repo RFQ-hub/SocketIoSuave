@@ -378,3 +378,7 @@ module Protocol =
                         Some(reconstruct partial), { state with PartialPacket = None }
                     else
                         None, { state with PartialPacket = Some partial }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Packet =
+    let encode = Protocol.PacketEncoder.encode

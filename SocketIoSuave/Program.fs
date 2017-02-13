@@ -5,9 +5,9 @@ open Suave.Operators
 open SocketIoSuave.EngineIo.Protocol
 open SocketIoSuave
 open System.Security.Cryptography
-open System.Threading
 open Suave.Logging
 open Suave.Logging.Message
+open SocketIoSuave.SocketIo
 
 let handlePacket (packet: PacketMessage) =
     printfn "Received: %A" packet
@@ -106,6 +106,9 @@ type EngineIoConfig =
         CookiePath: string option
         CookieHttpOnly: bool
         RandomNumberGenerator: RandomNumberGenerator
+        
+        /// Packets sent along with the handshake
+        InitialPackets: PacketMessage list
         onPacket: Socket -> PacketMessage -> Async<unit>
         getPacket: HttpContext -> Async<PacketMessage option>
         getPayload: HttpContext -> Async<Payload option>
@@ -125,6 +128,7 @@ type EngineIoConfig =
             PingTimeout = TimeSpan.FromSeconds(60.)
             PingInterval = TimeSpan.FromSeconds(25.)
             RandomNumberGenerator = RandomNumberGenerator.Create()
+            InitialPackets = []
             onPacket = (fun socket message -> async {
                 match message with
                 | Ping data -> socket |> Socket.send (Pong(data))
@@ -252,7 +256,7 @@ let serveEngineIo (config: EngineIoConfig) =
             
             ctx.runtime.logger.info (eventX (sprintf "Creating session with ID %s" socketId))
 
-            let payload = Payload([Open(handshake)])
+            let payload = Payload(Open(handshake) :: config.InitialPackets)
 
             let pipeline = setIoCookie config socketId >=> respondPayload payload engineContext
             return! pipeline ctx
@@ -305,12 +309,30 @@ let serveEngineIo (config: EngineIoConfig) =
             >=> disableXSSProtectionForIE
     ]
 
+type SocketIoConfig =
+    {
+        EngineConfig: EngineIoConfig
+    }
+
+let emptySocketIoConfig =
+    {
+        EngineConfig =
+            { EngineIoConfig.empty with
+                Path = "/socket.io/"
+                InitialPackets = { Packet.Type = PacketType.Connect; Namespace = "/"; EventId = None; Data = [] } |> Packet.encode |> List.map Message
+            }
+    }
+
+let serveSocketIo config =
+    serveEngineIo config.EngineConfig
+
 [<EntryPoint>]
 let main argv = 
     let conf = { EngineIoConfig.empty with Upgrades = Array.empty }
     let app =
         choose [
-            serveEngineIo { EngineIoConfig.empty with Path = "/socket.io/" }
+            //serveEngineIo { EngineIoConfig.empty with Path = "/socket.io/"; InitialPackets = initialPackets }
+            serveSocketIo emptySocketIoConfig
             Successful.OK "Hello World!"
         ]
     let suaveConf = { defaultConfig with logger = Targets.create Debug [| "Suave" |] }
