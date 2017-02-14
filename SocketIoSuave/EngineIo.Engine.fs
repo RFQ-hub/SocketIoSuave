@@ -22,30 +22,12 @@ with
 type IncomingCommunication =
     | NewIncomming of PacketMessage
     | ReadIncomming of AsyncReplyChannel<PacketMessage>
+    | CloseIncomming
 
-and OutgoingCommunication =
+type OutgoingCommunication =
     | NewOutgoing of PacketMessage
     | ReadOutgoing of AsyncReplyChannel<Payload>
-
-and Socket =
-    {
-        Id: SocketId
-        Transport: Transport
-        IncomingMessages: MailboxProcessor<IncomingCommunication>
-        OutgoingMessages: MailboxProcessor<OutgoingCommunication>
-    }
-
-[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
-module Socket =
-    /// Send a packet to the client. This is a non-blocking write.
-    let send msg socket = socket.OutgoingMessages.Post(OutgoingCommunication.NewOutgoing(msg))
-
-    let getOutgoing timeout socket =
-        // TODO: If we timeout, kill the socket
-        socket.OutgoingMessages.PostAndAsyncReply ((fun c -> ReadOutgoing(c)), timeout)
-
-    let addIncoming message socket =
-        socket.IncomingMessages.Post (IncomingCommunication.NewIncomming message)
+    | CloseOutgoing
 
 type EngineIoConfig =
     {
@@ -143,9 +125,28 @@ type Error =
     | UnknownSessionId
     | Unknown
 
-type InternalEngineIoSocket(id: SocketId) as this =
+type InternalEngineIoSocket(id: SocketId, pingTimeout: TimeSpan, onClose: InternalEngineIoSocket -> unit) as this =
+    let logError s = ll.error (eventX (sprintf "[%s] %s" (id.ToString()) s))
     let logDebug s = ll.debug (eventX (sprintf "[%s] %s" (id.ToString()) s))
     let logWarn s = ll.warn (eventX (sprintf "[%s] %s" (id.ToString()) s))
+
+    let closeLock = new obj()
+    let mutable closed = false
+
+    let timeoutInMs = int pingTimeout.TotalMilliseconds
+
+    let pingTimeoutTimer =
+        let timer = new System.Timers.Timer()
+        timer.AutoReset <- false
+        timer.Interval <- pingTimeout.TotalMilliseconds
+        timer.Elapsed.Add(fun _ ->
+            logDebug "Ping timeout, closing socket"
+            this.Close())
+        timer
+
+    let setPingTimeout () =
+        pingTimeoutTimer.Stop()
+        pingTimeoutTimer.Start()
 
     let incomming = MailboxProcessor<IncomingCommunication>.Start(fun inbox ->
         let rec loop (messages: Queue<PacketMessage>) (currentReplyChan: AsyncReplyChannel<PacketMessage> option) = async {
@@ -153,6 +154,7 @@ type InternalEngineIoSocket(id: SocketId) as this =
 
             match msg with
             | NewIncomming msg ->
+                setPingTimeout()
                 logDebug (sprintf "[NewIncomming] %A" msg)
 
                 match msg with
@@ -183,6 +185,9 @@ type InternalEngineIoSocket(id: SocketId) as this =
                     logWarn ""
                     // app.logError (sprintf "%A CROSS THE BEAMS" socket.Id)                           
                     failwith "Don't cross the beams !"
+            | CloseIncomming ->
+                logDebug "[CloseIncomming] Closing"
+                return ()
         }
 
         loop (new Queue<PacketMessage>()) None
@@ -218,21 +223,55 @@ type InternalEngineIoSocket(id: SocketId) as this =
                     logDebug (sprintf "[ReadOutgoing] %i available" messages.Length)
                     rep.Reply(Payload(messages))
                     return! loop [] None
+            | CloseOutgoing ->
+                logDebug "[CloseOutgoing] Closing"
+                return ()
         }
 
         loop [] None
     )
 
+    let onMailBoxError (x: Exception) =
+        logError (x.ToString())
+        this.Close()
+
+    do
+        incomming.DefaultTimeout <- timeoutInMs * 2
+        incomming.Error.Add(onMailBoxError)
+        outgoing.DefaultTimeout <- timeoutInMs * 2
+        outgoing.Error.Add(onMailBoxError)
+        setPingTimeout ()
+
     member val Id = id
-    member __.ReadIncomming() = incomming.PostAndTryAsyncReply ReadIncomming
-    member __.ReadOutgoing() = outgoing.PostAndTryAsyncReply ReadOutgoing
+    member __.ReadIncomming() =
+        lock closeLock (fun _ ->
+            if closed then
+                Async.result None
+            else
+                incomming.PostAndTryAsyncReply(ReadIncomming, timeoutInMs))
+    member __.ReadOutgoing() =
+        lock closeLock (fun _ ->
+            if closed then
+                Async.result None
+            else
+                outgoing.PostAndTryAsyncReply(ReadOutgoing, timeoutInMs))
     member __.AddOutgoing(msg) = outgoing.Post (NewOutgoing msg)
     member __.AddIncomming(msg) = incomming.Post (NewIncomming msg)
+    member __.Close() =
+        lock closeLock (fun _ ->
+            if not closed then
+                closed <- true
+                onClose this
+                pingTimeoutTimer.Stop()
+                pingTimeoutTimer.Dispose()
+                incomming.Post CloseIncomming
+                outgoing.Post CloseOutgoing)
 
-type EngineIoSocket internal (int: InternalEngineIoSocket) =
-    member val Id = int.Id
-    member __.Read() = int.ReadIncomming()
-    member __.Send(msg) = int.AddOutgoing(msg)
+type EngineIoSocket internal (socket: InternalEngineIoSocket) =
+    member val Id = socket.Id
+    member __.Read() = socket.ReadIncomming()
+    member __.Send(msg) = socket.AddOutgoing(msg)
+    member __.Close() = socket.Close()
 
 let inline private badAsync err = Async.result (Bad [err]) |> AR
 let inline private okAsync ok = Async.result (Ok(ok,[])) |> AR
@@ -320,10 +359,26 @@ let inline private bytesResponse (code: HttpCode) (bytes: byte[]) =
 let inline private simpleResponse (code: HttpCode) (message: string) =
     bytesResponse code (UTF8.bytes message)
 
+/// Use CompareExchange to apply a mutation to a field.
+/// Mutation must be pure & writes to the field should be rare compared to reads.
+let mutateField<'t when 't: not struct> (targetField: 't byref) (mutation: 't -> 't) =
+    let mutable retry = true
+    while retry do
+        let before = targetField
+        let newValue = mutation before
+        let afterExchange = System.Threading.Interlocked.CompareExchange(&targetField, newValue, before)
+        retry <- not (obj.ReferenceEquals(before, afterExchange))
+
 type EngineIo(config, app: EngineApp) =
     let mutable sessions: Map<SocketId, InternalEngineIoSocket> = Map.empty
     let idGenerator = Base64Id.create config.RandomNumberGenerator
     
+    let socketTimeout = config.PingTimeout + config.PingInterval
+    
+    let socketClosed (socket: InternalEngineIoSocket) =
+        ll.info (eventX (sprintf "Removing session with ID %s" (socket.Id.ToString())))
+        mutateField &sessions (fun s -> s |> Map.remove socket.Id)
+
     let payloadToResponse sid payload engineCtx =
         if engineCtx.SupportsBinary then
             bytesResponse HttpCode.HTTP_200 (payload |> Payload.encodeToBinary |> Segment.toArray)
@@ -342,8 +397,8 @@ type EngineIo(config, app: EngineApp) =
             let socketIdString = idGenerator ()
             let socketId = SocketId socketIdString
 
-            let socket = new InternalEngineIoSocket(socketId)
-            sessions <- sessions |> Map.add socket.Id socket
+            let socket = new InternalEngineIoSocket(socketId, socketTimeout, socketClosed)
+            mutateField &sessions (fun s -> s |> Map.add socket.Id socket)
             
             ll.info (eventX (sprintf "Creating session with ID %s" socketIdString))
 
