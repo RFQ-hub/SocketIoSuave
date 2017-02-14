@@ -35,7 +35,8 @@ let rec onSocket (socket: EngineIoSocket) = async {
     | Some(packet) ->
         printfn "Received: %A" packet
         return! onSocket socket
-    | None -> return ()
+    | None ->
+        return ()
 }
 
 let serveSocketIo config =

@@ -12,6 +12,7 @@ open Suave.CORS
 open Suave.Operators
 open Suave.Cookie
 open Chessie.ErrorHandling
+open System.Threading.Tasks
 
 let ll = Targets.create Debug [| "Bug" |]
 
@@ -125,13 +126,14 @@ type Error =
     | UnknownSessionId
     | Unknown
 
-type InternalEngineIoSocket(id: SocketId, pingTimeout: TimeSpan, onClose: InternalEngineIoSocket -> unit) as this =
+type InternalEngineIoSocket(id: SocketId, pingTimeout: TimeSpan, onClose: InternalEngineIoSocket -> unit, handleSocket: EngineIoSocket -> Async<unit>) as this =
     let logError s = ll.error (eventX (sprintf "[%s] %s" (id.ToString()) s))
     let logDebug s = ll.debug (eventX (sprintf "[%s] %s" (id.ToString()) s))
     let logWarn s = ll.warn (eventX (sprintf "[%s] %s" (id.ToString()) s))
 
     let closeLock = new obj()
     let mutable closed = false
+    let mutable task: Task = null
 
     let timeoutInMs = int pingTimeout.TotalMilliseconds
 
@@ -240,9 +242,17 @@ type InternalEngineIoSocket(id: SocketId, pingTimeout: TimeSpan, onClose: Intern
         incomming.Error.Add(onMailBoxError)
         outgoing.DefaultTimeout <- timeoutInMs * 2
         outgoing.Error.Add(onMailBoxError)
-        setPingTimeout ()
 
     member val Id = id
+    member __.Start() =
+        setPingTimeout ()
+        
+        // Start the async handler for this socket on the threadpool
+        task <- handleSocket (new EngineIoSocket(this)) |> Async.StartAsTask
+        
+        // When the handler finishes, close the socket
+        task.ContinueWith(fun _ -> this.Close()) |> ignore
+
     member __.ReadIncomming() =
         lock closeLock (fun _ ->
             if closed then
@@ -267,8 +277,8 @@ type InternalEngineIoSocket(id: SocketId, pingTimeout: TimeSpan, onClose: Intern
                 incomming.Post CloseIncomming
                 outgoing.Post CloseOutgoing)
 
-type EngineIoSocket internal (socket: InternalEngineIoSocket) =
-    member val Id = socket.Id
+and EngineIoSocket internal (socket: InternalEngineIoSocket) =
+    member __.Id with get () = socket.Id
     member __.Read() = socket.ReadIncomming()
     member __.Send(msg) = socket.AddOutgoing(msg)
     member __.Close() = socket.Close()
@@ -397,13 +407,11 @@ type EngineIo(config, app: EngineApp) =
             let socketIdString = idGenerator ()
             let socketId = SocketId socketIdString
 
-            let socket = new InternalEngineIoSocket(socketId, socketTimeout, socketClosed)
+            let socket = new InternalEngineIoSocket(socketId, socketTimeout, socketClosed, app.handleSocket)
             mutateField &sessions (fun s -> s |> Map.add socket.Id socket)
+            socket.Start()
             
             ll.info (eventX (sprintf "Creating session with ID %s" socketIdString))
-
-            // TODO: When the handler finishes we want to kill the session
-            app.handleSocket (new EngineIoSocket(socket)) |> Async.StartAsTask |> ignore
 
             let handshake = mkHandshake socketIdString config
             let payload = Payload(Open(handshake) :: config.InitialPackets)
