@@ -29,8 +29,17 @@ let emptySocketIoConfig =
             }
     }
 
+let rec onSocket (socket: EngineIoSocket) = async {
+    let! message = socket.Read()
+    match message with
+    | Some(packet) ->
+        printfn "Received: %A" packet
+        return! onSocket socket
+    | None -> return ()
+}
+
 let serveSocketIo config =
-    serveEngineIo config.EngineConfig
+    suaveEngineIo config.EngineConfig onSocket
 
 [<EntryPoint>]
 let main argv = 
