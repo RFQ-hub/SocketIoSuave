@@ -37,6 +37,7 @@ type ISocketIoSocket =
     abstract member Id: SocketId with get
     abstract member Receive: unit -> Async<Packet option>
     abstract member Send: Packet -> unit
+    abstract member Broadcast: Packet -> unit
     abstract member Close: unit -> unit
 
 type private IncomingCommunication =
@@ -107,6 +108,10 @@ type private SocketIoSocket(engineSocket: IEngineIoSocket, handlePackets: ISocke
     let send packet =
         let content = Protocol.PacketEncoder.encode packet
         engineSocket.Send(content)
+
+    let broadcast packet =
+        let content = Protocol.PacketEncoder.encode packet
+        engineSocket.Broadcast(content)
         
     let read () =
         lock closeLock (fun _ ->
@@ -147,6 +152,7 @@ type private SocketIoSocket(engineSocket: IEngineIoSocket, handlePackets: ISocke
         member __.Id with get () = engineSocket.Id
         member __.Receive() = read ()
         member __.Send(packet) = send packet
+        member __.Broadcast(packet) = broadcast packet
         member __.Close() = this.Close()
 
 type SocketIo(handlePackets: ISocketIoSocket -> Async<unit>) =
@@ -169,6 +175,10 @@ type SocketIo(handlePackets: ISocketIoSocket -> Async<unit>) =
     member val Version = Protocol.version
     member val WebPart = handle
 
+    member __.Broadcast(packet: Packet) =
+        let content = Protocol.PacketEncoder.encode packet
+        engine.Broadcast(content)
+
 [<EntryPoint>]
 let main argv = 
     let socketio handlePackets = SocketIo(handlePackets).WebPart
@@ -182,6 +192,11 @@ let main argv =
             match packet.EventId with
             | Some id -> socket.Send({ Packet.ofType Ack with EventId = Some id })
             | None -> ()
+            let cmd = packet.Data.[0].ToObject<string>()
+            if cmd = "chat message" then
+                let textMessage = packet.Data.[1].ToObject<string>()
+                logVerbose (sprintf "Received %s" textMessage)
+                socket.Broadcast packet
             logVerbose "Let's loop"
             return! handlePacket socket
         |None ->

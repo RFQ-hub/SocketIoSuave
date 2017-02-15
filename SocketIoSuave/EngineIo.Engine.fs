@@ -69,9 +69,10 @@ type Error =
 type IEngineIoSocket =
     abstract member Id: SocketId with get
     abstract member Read: unit -> Async<PacketContent option>
-    abstract member Send: PacketContent list -> unit
     abstract member Send: PacketContent seq -> unit
     abstract member Send: PacketContent -> unit
+    abstract member Broadcast: PacketContent seq -> unit
+    abstract member Broadcast: PacketContent -> unit
     abstract member Close: unit -> unit
 
 type private IncomingCommunication =
@@ -84,7 +85,13 @@ type private OutgoingCommunication =
     | ReadOutgoing of AsyncReplyChannel<Payload>
     | CloseOutgoing
 
-type private EngineIoSocket(id: SocketId, pingTimeout: TimeSpan, onClose: EngineIoSocket -> unit, handleSocket: IEngineIoSocket -> Async<unit>) as this =
+type private SocketEngineCommunication =
+    {
+        socketClosing: SocketId -> unit
+        broadcast: PacketContent seq -> unit
+    }
+
+type private EngineIoSocket(id: SocketId, pingTimeout: TimeSpan, comms: SocketEngineCommunication, handleSocket: IEngineIoSocket -> Async<unit>) as this =
     let logVerbose s = log.debug (eventX (sprintf "engine {socketId}: %s" s) >> setField "socketId" (id.ToString()))
     let logError s = log.error (eventX (sprintf "engine {socketId}: %s" s) >> setField "socketId" (id.ToString()))
     let logDebug s = log.debug (eventX (sprintf "engine {socketId}: %s" s) >> setField "socketId" (id.ToString()))
@@ -246,19 +253,24 @@ type private EngineIoSocket(id: SocketId, pingTimeout: TimeSpan, onClose: Engine
             if not closed then
                 logDebug "Closing"
                 closed <- true
-                onClose this
+                comms.socketClosing id
                 pingTimeoutTimer.Stop()
                 pingTimeoutTimer.Dispose()
                 incomming.Post CloseIncomming
                 outgoing.Post CloseOutgoing
                 logDebug "Closed")
     
+    member __.Send(messages) = this.AddOutgoing(messages |> List.map Message)
+    member __.Send(messages) = this.AddOutgoing(messages |> Seq.map Message |> List.ofSeq)
+    member __.Send(message) = this.AddOutgoing([Message message])
+
     interface IEngineIoSocket with
         member __.Id with get () = this.Id
         member __.Read() = this.ReadIncomming()
-        member __.Send(messages) = this.AddOutgoing(messages |> List.map Message)
-        member __.Send(messages) = this.AddOutgoing(messages |> Seq.map Message |> List.ofSeq)
-        member __.Send(message) = this.AddOutgoing([Message message])
+        member __.Send(messages: PacketContent seq) = this.Send(messages)
+        member __.Send(message: PacketContent) = this.Send(message)
+        member __.Broadcast(messages: PacketContent seq) = comms.broadcast messages
+        member __.Broadcast(message: PacketContent) = comms.broadcast ([message] :> _ seq)
         member __.Close() = this.Close()
 
 let inline private badAsync err = Async.result (Bad [err]) |> AR
@@ -348,15 +360,21 @@ let mutateField<'t when 't: not struct> (targetField: 't byref) (mutation: 't ->
         let afterExchange = System.Threading.Interlocked.CompareExchange(&targetField, newValue, before)
         retry <- not (obj.ReferenceEquals(before, afterExchange))
 
-type EngineIo(config, app: EngineApp) =
+type EngineIo(config, app: EngineApp) as this =
     let mutable sessions: Map<SocketId, EngineIoSocket> = Map.empty
     let idGenerator = Base64Id.create config.RandomNumberGenerator
     
     let socketTimeout = config.PingTimeout + config.PingInterval
     
-    let socketClosed (socket: EngineIoSocket) =
-        log.info (eventX (sprintf "Removing session with ID %s" (socket.Id.ToString())))
-        mutateField &sessions (fun s -> s |> Map.remove socket.Id)
+    let removeSocket (socketId: SocketId) =
+        log.info (eventX (sprintf "Removing session with ID %s" (socketId.ToString())))
+        mutateField &sessions (fun s -> s |> Map.remove socketId)
+
+    let socketCommunications =
+        {
+            socketClosing = removeSocket
+            broadcast = this.Broadcast
+        }
 
     let payloadToResponse sid payload engineCtx =
         if engineCtx.SupportsBinary then
@@ -376,7 +394,7 @@ type EngineIo(config, app: EngineApp) =
             let socketIdString = idGenerator ()
             let socketId = SocketId socketIdString
 
-            let socket = new EngineIoSocket(socketId, socketTimeout, socketClosed, app.handleSocket)
+            let socket = new EngineIoSocket(socketId, socketTimeout, socketCommunications, app.handleSocket)
             mutateField &sessions (fun s -> s |> Map.add socket.Id socket)
             socket.Start()
             
@@ -454,6 +472,12 @@ type EngineIo(config, app: EngineApp) =
 
     member val Handle = handle
 
+    member __.Broadcast(messages: PacketContent seq) =
+        let messages' = List.ofSeq messages
+        sessions |> Map.iter (fun _ socket -> socket.Send(messages'))
+
+    member __.Broadcast(message: PacketContent) =
+        sessions |> Map.iter (fun _ socket -> socket.Send(message))
 
 // Fixed in next Suave version, https://github.com/SuaveIO/suave/pull/575
 let private removeBuggyCorsHeader: WebPart =
