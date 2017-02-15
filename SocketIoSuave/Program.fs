@@ -45,9 +45,10 @@ type private IncomingCommunication =
     | CloseIncomming
 
 type private SocketIoSocket(engineSocket: IEngineIoSocket, handlePackets: ISocketIoSocket -> Async<unit>) as this =
-    let logError s = log.error (eventX (sprintf "[%s] %s" (engineSocket.Id.ToString()) s))
-    let logDebug s = log.debug (eventX (sprintf "[%s] %s" (engineSocket.Id.ToString()) s))
-    let logWarn s = log.warn (eventX (sprintf "[%s] %s" (engineSocket.Id.ToString()) s))
+    let logVerbose s = log.debug (eventX (sprintf "socket {socketId}: %s" s) >> setField "socketId" (engineSocket.Id.ToString()))
+    let logError s = log.error (eventX (sprintf "socket {socketId}: %s" s) >> setField "socketId" (engineSocket.Id.ToString()))
+    let logDebug s = log.debug (eventX (sprintf "socket {socketId}: %s" s) >> setField "socketId" (engineSocket.Id.ToString()))
+    let logWarn s = log.warn (eventX (sprintf "socket {socketId}: %s" s) >> setField "socketId" (engineSocket.Id.ToString()))
 
     let closeLock = new obj()
     let mutable closed = false
@@ -59,6 +60,7 @@ type private SocketIoSocket(engineSocket: IEngineIoSocket, handlePackets: ISocke
 
             match msg with
             | NewIncomming msg ->
+                logVerbose (sprintf "NewIncomming %A" msg)
                 match currentReplyChan with
                 | Some(chan) ->
                     chan.Reply(Some msg)
@@ -75,6 +77,7 @@ type private SocketIoSocket(engineSocket: IEngineIoSocket, handlePackets: ISocke
                     return! loop messages None
                 | _, Some(_) -> failwith "Don't cross the beams !"
             | CloseIncomming ->
+                logVerbose "CloseIncomming"
                 match currentReplyChan with
                 | Some(chan) -> chan.Reply(None)
                 | None -> ()
@@ -94,8 +97,10 @@ type private SocketIoSocket(engineSocket: IEngineIoSocket, handlePackets: ISocke
             match newPacket with
             | Some newPacket -> incomming.Post(NewIncomming newPacket)
             | None -> ()
+            logVerbose "Looping !"
             return! handle newState
         | None ->
+            logVerbose "Read returned None, finishing"
             return ()
     }
 
@@ -112,6 +117,7 @@ type private SocketIoSocket(engineSocket: IEngineIoSocket, handlePackets: ISocke
                 |> Async.map Option.flattern)
 
     let onMailBoxError (x: Exception) =
+        logError (sprintf "Exception, will close: %O" (x.ToString()))
         logError (x.ToString())
         this.Close()
 
@@ -123,7 +129,9 @@ type private SocketIoSocket(engineSocket: IEngineIoSocket, handlePackets: ISocke
         task <- handlePackets (this) |> Async.StartAsTask
         
         // When the handler finishes, close the socket
-        task.ContinueWith(fun _ -> this.Close()) |> ignore
+        task.ContinueWith(fun _ -> 
+            logDebug "Handler finished, will close"
+            this.Close()) |> ignore
 
         // Start our packet decoding loop
         handle Protocol.PacketDecoder.empty
@@ -166,6 +174,7 @@ let main argv =
     let socketio handlePackets = SocketIo(handlePackets).WebPart
 
     let rec handlePacket (socket: ISocketIoSocket) = async {
+        let logVerbose s = log.debug (eventX (sprintf "program {socketId}: %s" s) >> setField "socketId" (id.ToString()))
         let! p = socket.Receive()
         match p with
         |Some packet ->
@@ -173,8 +182,11 @@ let main argv =
             match packet.EventId with
             | Some id -> socket.Send({ Packet.ofType Ack with EventId = Some id })
             | None -> ()
+            logVerbose "Let's loop"
             return! handlePacket socket
-        |None -> return ()
+        |None ->
+            logVerbose "None received, it's the end !"
+            return ()
     }
 
     let app =
@@ -184,6 +196,6 @@ let main argv =
             // serveSocketIo emptySocketIoConfig
             Successful.OK "Hello World!"
         ]
-    let suaveConf = { defaultConfig with logger = Targets.create Debug [| "Suave" |] }
+    let suaveConf = { defaultConfig with logger = Targets.create Debug [| "SocketIoSuave" |] }
     startWebServer suaveConf app
     0

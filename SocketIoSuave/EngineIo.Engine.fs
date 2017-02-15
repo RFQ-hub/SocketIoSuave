@@ -85,10 +85,11 @@ type private OutgoingCommunication =
     | CloseOutgoing
 
 type private EngineIoSocket(id: SocketId, pingTimeout: TimeSpan, onClose: EngineIoSocket -> unit, handleSocket: IEngineIoSocket -> Async<unit>) as this =
-    let logError s = log.error (eventX (sprintf "[%s] %s" (id.ToString()) s))
-    let logDebug s = log.debug (eventX (sprintf "[%s] %s" (id.ToString()) s))
-    let logWarn s = log.warn (eventX (sprintf "[%s] %s" (id.ToString()) s))
-
+    let logVerbose s = log.debug (eventX (sprintf "engine {socketId}: %s" s) >> setField "socketId" (id.ToString()))
+    let logError s = log.error (eventX (sprintf "engine {socketId}: %s" s) >> setField "socketId" (id.ToString()))
+    let logDebug s = log.debug (eventX (sprintf "engine {socketId}: %s" s) >> setField "socketId" (id.ToString()))
+    let logWarn s = log.warn (eventX (sprintf "engine {socketId}: %s" s) >> setField "socketId" (id.ToString()))
+    
     let closeLock = new obj()
     let mutable closed = false
     let mutable task: Task = null
@@ -116,13 +117,19 @@ type private EngineIoSocket(id: SocketId, pingTimeout: TimeSpan, onClose: Engine
             | NewIncomming msg ->
                 // We're nice an consider any message as a ping for the purpose of connection timeouts
                 setPingTimeout()
+                logVerbose (sprintf "NewIncomming %A" msg)
 
                 match msg with
-                | Ping data -> this.AddOutgoing([Pong(data)])
-                | Open _ -> logWarn "[NewIncomming] Open received during communication"
+                | Ping data ->
+                    this.AddOutgoing([Pong(data)])
+                    return! loop messages currentReplyChan
+                | Open _ ->
+                    logWarn "[NewIncomming] Open received during communication"
+                    return! loop messages currentReplyChan
                 | Upgrade ->
                     // TODO
                     logWarn "[NewIncomming] Upgrade not handled for now"
+                    return! loop messages currentReplyChan
                 | Close -> this.Close()
                 | Message content ->
                     match currentReplyChan with
@@ -130,10 +137,10 @@ type private EngineIoSocket(id: SocketId, pingTimeout: TimeSpan, onClose: Engine
                         chan.Reply(Some content)
                     | None ->
                         messages.Enqueue content
-                | Pong _
-                | Noop -> ()
 
-                return! loop messages None
+                    return! loop messages None
+                | Pong _
+                | Noop -> return! loop messages currentReplyChan
             | ReadIncomming rep ->
                 match messages.Count = 0, currentReplyChan with
                 | true, None-> return! loop messages (Some(rep))
@@ -144,6 +151,7 @@ type private EngineIoSocket(id: SocketId, pingTimeout: TimeSpan, onClose: Engine
                 | _, Some(_) ->
                     failwith "Don't cross the beams !"
             | CloseIncomming ->
+                logVerbose "CloseIncomming"
                 match currentReplyChan with
                 | Some(chan) -> chan.Reply(None)
                 | None -> ()
@@ -158,6 +166,7 @@ type private EngineIoSocket(id: SocketId, pingTimeout: TimeSpan, onClose: Engine
             let! msg = inbox.Receive()
             match msg with
             | NewOutgoing newMessages ->
+                logVerbose (sprintf "NewOutgoing %A" newMessages)
                 let allMessages = List.append newMessages messages
                 match currentReplyChan with
                 | Some(chan) ->
@@ -180,6 +189,7 @@ type private EngineIoSocket(id: SocketId, pingTimeout: TimeSpan, onClose: Engine
                     rep.Reply(Payload(messages))
                     return! loop [] None
             | CloseOutgoing ->
+                logVerbose "CloseOutgoing"
                 match currentReplyChan with
                 | Some(chan) -> chan.Reply(Payload([Close]))
                 | None -> ()
@@ -190,7 +200,7 @@ type private EngineIoSocket(id: SocketId, pingTimeout: TimeSpan, onClose: Engine
     )
 
     let onMailBoxError (x: Exception) =
-        logError (x.ToString())
+        logError (sprintf "Exception, will close: %O" (x.ToString()))
         this.Close()
 
     do
@@ -207,32 +217,41 @@ type private EngineIoSocket(id: SocketId, pingTimeout: TimeSpan, onClose: Engine
         task <- handleSocket (this) |> Async.StartAsTask
         
         // When the handler finishes, close the socket
-        task.ContinueWith(fun _ -> this.Close()) |> ignore
+        task.ContinueWith(fun _ ->
+            logDebug "Handler finished, will close"
+            this.Close()) |> ignore
 
     member __.ReadIncomming() =
         lock closeLock (fun _ ->
             if closed then
                 Async.result None
             else
-                incomming.PostAndTryAsyncReply(ReadIncomming, timeoutInMs)
-                |> Async.map Option.flattern)
+                incomming.PostAndAsyncReply(ReadIncomming))
+
     member __.ReadOutgoing() =
         lock closeLock (fun _ ->
             if closed then
                 Async.result None
             else
                 outgoing.PostAndTryAsyncReply(ReadOutgoing, timeoutInMs))
-    member __.AddOutgoing(messages) = outgoing.Post (NewOutgoing messages)
-    member __.AddIncomming(msg) = incomming.Post (NewIncomming msg)
+
+    member __.AddOutgoing(messages) =
+        outgoing.Post (NewOutgoing messages)
+
+    member __.AddIncomming(msg) =
+        incomming.Post (NewIncomming msg)
+
     member __.Close() =
         lock closeLock (fun _ ->
             if not closed then
+                logDebug "Closing"
                 closed <- true
                 onClose this
                 pingTimeoutTimer.Stop()
                 pingTimeoutTimer.Dispose()
                 incomming.Post CloseIncomming
-                outgoing.Post CloseOutgoing)
+                outgoing.Post CloseOutgoing
+                logDebug "Closed")
     
     interface IEngineIoSocket with
         member __.Id with get () = this.Id
@@ -372,6 +391,7 @@ type EngineIo(config, app: EngineApp) =
             | Some(socket) -> asyncTrial {
                 let! payload = socket.ReadOutgoing ()
                 let payload' = defaultArg payload (Payload([]))
+                log.debug (eventX (sprintf "%s <- %A" sessionId (Payload.getMessages payload')))
                 return socketId, payload'
                 }
             | None ->
