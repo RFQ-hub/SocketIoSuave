@@ -14,21 +14,11 @@ open Suave.Cookie
 open Chessie.ErrorHandling
 open System.Threading.Tasks
 
-let ll = Targets.create Debug [| "Bug" |]
+let private log = Log.create "engine.io"
 
 type SocketId = SocketId of string
 with
     override x.ToString() = match x with | SocketId s -> s
-
-type IncomingCommunication =
-    | NewIncomming of PacketMessage
-    | ReadIncomming of AsyncReplyChannel<PacketMessage>
-    | CloseIncomming
-
-type OutgoingCommunication =
-    | NewOutgoing of PacketMessage
-    | ReadOutgoing of AsyncReplyChannel<Payload>
-    | CloseOutgoing
 
 type EngineIoConfig =
     {
@@ -64,56 +54,6 @@ let private mkCookie (socketId: SocketId) config =
         Some { HttpCookie.empty with name = cookieName; value = socketId.ToString(); path = config.CookiePath; httpOnly = config.CookieHttpOnly }
     | None -> None
 
-(*
-open SocketIoSuave.EngineIo.Protocol
-
-type SocketId = SocketId of string
-type Socket = unit
-type EngineIoServer =
-    {
-        OpenSessions: Map<SocketId, Socket>
-    }
-
-type RawQueryParams =
-    {
-        Transport: string option
-        P: string option
-        B64: string option
-        Sid: string option
-        ContentType: string option
-    }
-
-type QueryParams = 
-    {
-        Transport: Transport
-        JsonPIndex: int option
-        SessionId: string option
-        SupportsBinary: bool
-        IsBinary: bool
-    }
-
-type EngineApp<'ctx> = 
-    {
-        getQueryParams: 'ctx -> RawQueryParams
-        getStringContent: 'ctx -> string
-        getBinaryContent: 'ctx -> byte[]
-    }
-*)
-
-(*
-let createSocket socketId handleIncomming app =
-    let socket = {
-        Id = socketId
-        Transport = Polling
-        IncomingMessages = 
-        OutgoingMessages = 
-    }
-
-    socket.IncomingMessages.Post(IncomingCommunication.Init(socket))
-    socket.OutgoingMessages.Post(OutgoingCommunication.Init(socket))
-    socket
-*)
-
 let private mkHandshake socketId config =
     {
         Sid = socketId;
@@ -126,10 +66,28 @@ type Error =
     | UnknownSessionId
     | Unknown
 
-type InternalEngineIoSocket(id: SocketId, pingTimeout: TimeSpan, onClose: InternalEngineIoSocket -> unit, handleSocket: EngineIoSocket -> Async<unit>) as this =
-    let logError s = ll.error (eventX (sprintf "[%s] %s" (id.ToString()) s))
-    let logDebug s = ll.debug (eventX (sprintf "[%s] %s" (id.ToString()) s))
-    let logWarn s = ll.warn (eventX (sprintf "[%s] %s" (id.ToString()) s))
+type IEngineIoSocket =
+    abstract member Id: SocketId with get
+    abstract member Read: unit -> Async<PacketContent option>
+    abstract member Send: PacketContent list -> unit
+    abstract member Send: PacketContent seq -> unit
+    abstract member Send: PacketContent -> unit
+    abstract member Close: unit -> unit
+
+type private IncomingCommunication =
+    | NewIncomming of PacketMessage
+    | ReadIncomming of AsyncReplyChannel<PacketContent option>
+    | CloseIncomming
+
+type private OutgoingCommunication =
+    | NewOutgoing of PacketMessage list
+    | ReadOutgoing of AsyncReplyChannel<Payload>
+    | CloseOutgoing
+
+type private EngineIoSocket(id: SocketId, pingTimeout: TimeSpan, onClose: EngineIoSocket -> unit, handleSocket: IEngineIoSocket -> Async<unit>) as this =
+    let logError s = log.error (eventX (sprintf "[%s] %s" (id.ToString()) s))
+    let logDebug s = log.debug (eventX (sprintf "[%s] %s" (id.ToString()) s))
+    let logWarn s = log.warn (eventX (sprintf "[%s] %s" (id.ToString()) s))
 
     let closeLock = new obj()
     let mutable closed = false
@@ -151,63 +109,62 @@ type InternalEngineIoSocket(id: SocketId, pingTimeout: TimeSpan, onClose: Intern
         pingTimeoutTimer.Start()
 
     let incomming = MailboxProcessor<IncomingCommunication>.Start(fun inbox ->
-        let rec loop (messages: Queue<PacketMessage>) (currentReplyChan: AsyncReplyChannel<PacketMessage> option) = async {
+        let rec loop (messages: Queue<PacketContent>) (currentReplyChan: AsyncReplyChannel<PacketContent option> option) = async {
             let! msg = inbox.Receive()
 
             match msg with
             | NewIncomming msg ->
+                // We're nice an consider any message as a ping for the purpose of connection timeouts
                 setPingTimeout()
-                logDebug (sprintf "[NewIncomming] %A" msg)
 
                 match msg with
-                | Ping(data) ->
-                    logDebug "[NewIncomming] Answering Ping with Pong"
-                    this.AddOutgoing(Pong(data))
-                | _ -> ()
-                
-                match currentReplyChan with
-                | Some(chan) ->
-                    logDebug (sprintf "[NewIncomming] Reply channel exists, sending %A" msg)
-                    chan.Reply(msg)
-                | None ->
-                    messages.Enqueue msg
+                | Ping data -> this.AddOutgoing([Pong(data)])
+                | Open _ -> logWarn "[NewIncomming] Open received during communication"
+                | Upgrade ->
+                    // TODO
+                    logWarn "[NewIncomming] Upgrade not handled for now"
+                | Close -> this.Close()
+                | Message content ->
+                    match currentReplyChan with
+                    | Some(chan) ->
+                        chan.Reply(Some content)
+                    | None ->
+                        messages.Enqueue content
+                | Pong _
+                | Noop -> ()
 
                 return! loop messages None
             | ReadIncomming rep ->
                 match messages.Count = 0, currentReplyChan with
-                | true, None->
-                    logDebug "[ReadIncomming] nothing yet"
-                    return! loop messages (Some(rep))
+                | true, None-> return! loop messages (Some(rep))
                 | false, None ->
-                    logDebug (sprintf "[ReadIncomming] %i available" messages.Count)
                     let msg = messages.Dequeue()
-                    rep.Reply msg
+                    rep.Reply (Some msg)
                     return! loop messages None
                 | _, Some(_) ->
-                    logWarn ""
-                    // app.logError (sprintf "%A CROSS THE BEAMS" socket.Id)                           
                     failwith "Don't cross the beams !"
             | CloseIncomming ->
-                logDebug "[CloseIncomming] Closing"
+                match currentReplyChan with
+                | Some(chan) -> chan.Reply(None)
+                | None -> ()
                 return ()
         }
 
-        loop (new Queue<PacketMessage>()) None
+        loop (new Queue<PacketContent>()) None
         )
 
     let outgoing = MailboxProcessor<OutgoingCommunication>.Start(fun inbox ->
         let rec loop messages (currentReplyChan: AsyncReplyChannel<Payload> option) = async {
             let! msg = inbox.Receive()
             match msg with
-            | NewOutgoing msg ->
+            | NewOutgoing newMessages ->
+                let allMessages = List.append newMessages messages
                 match currentReplyChan with
                 | Some(chan) ->
-                    logDebug (sprintf "[NewOutgoing] Reply channel exists, sending %A" msg)
-                    chan.Reply(Payload(msg::messages))
+                    chan.Reply(Payload allMessages)
                     return! loop [] None
                 | None ->
-                    logDebug (sprintf "[NewOutgoing] Storing %A" msg)
-                    return! loop (msg::messages) None
+                    return! loop allMessages None
             | ReadOutgoing rep ->
                 match currentReplyChan with
                 | Some otherRep ->
@@ -218,15 +175,14 @@ type InternalEngineIoSocket(id: SocketId, pingTimeout: TimeSpan, onClose: Intern
                 | None -> ()
 
                 match messages with
-                | []->
-                    logDebug "[ReadOutgoing] nothing yet"
-                    return! loop [] (Some(rep))
+                | []-> return! loop [] (Some(rep))
                 | messages ->
-                    logDebug (sprintf "[ReadOutgoing] %i available" messages.Length)
                     rep.Reply(Payload(messages))
                     return! loop [] None
             | CloseOutgoing ->
-                logDebug "[CloseOutgoing] Closing"
+                match currentReplyChan with
+                | Some(chan) -> chan.Reply(Payload([Close]))
+                | None -> ()
                 return ()
         }
 
@@ -248,7 +204,7 @@ type InternalEngineIoSocket(id: SocketId, pingTimeout: TimeSpan, onClose: Intern
         setPingTimeout ()
         
         // Start the async handler for this socket on the threadpool
-        task <- handleSocket (new EngineIoSocket(this)) |> Async.StartAsTask
+        task <- handleSocket (this) |> Async.StartAsTask
         
         // When the handler finishes, close the socket
         task.ContinueWith(fun _ -> this.Close()) |> ignore
@@ -258,14 +214,15 @@ type InternalEngineIoSocket(id: SocketId, pingTimeout: TimeSpan, onClose: Intern
             if closed then
                 Async.result None
             else
-                incomming.PostAndTryAsyncReply(ReadIncomming, timeoutInMs))
+                incomming.PostAndTryAsyncReply(ReadIncomming, timeoutInMs)
+                |> Async.map Option.flattern)
     member __.ReadOutgoing() =
         lock closeLock (fun _ ->
             if closed then
                 Async.result None
             else
                 outgoing.PostAndTryAsyncReply(ReadOutgoing, timeoutInMs))
-    member __.AddOutgoing(msg) = outgoing.Post (NewOutgoing msg)
+    member __.AddOutgoing(messages) = outgoing.Post (NewOutgoing messages)
     member __.AddIncomming(msg) = incomming.Post (NewIncomming msg)
     member __.Close() =
         lock closeLock (fun _ ->
@@ -276,19 +233,21 @@ type InternalEngineIoSocket(id: SocketId, pingTimeout: TimeSpan, onClose: Intern
                 pingTimeoutTimer.Dispose()
                 incomming.Post CloseIncomming
                 outgoing.Post CloseOutgoing)
-
-and EngineIoSocket internal (socket: InternalEngineIoSocket) =
-    member __.Id with get () = socket.Id
-    member __.Read() = socket.ReadIncomming()
-    member __.Send(msg) = socket.AddOutgoing(msg)
-    member __.Close() = socket.Close()
+    
+    interface IEngineIoSocket with
+        member __.Id with get () = this.Id
+        member __.Read() = this.ReadIncomming()
+        member __.Send(messages) = this.AddOutgoing(messages |> List.map Message)
+        member __.Send(messages) = this.AddOutgoing(messages |> Seq.map Message |> List.ofSeq)
+        member __.Send(message) = this.AddOutgoing([Message message])
+        member __.Close() = this.Close()
 
 let inline private badAsync err = Async.result (Bad [err]) |> AR
 let inline private okAsync ok = Async.result (Ok(ok,[])) |> AR
 
 type EngineApp = 
     {
-        handleSocket: EngineIoSocket -> Async<unit>
+        handleSocket: IEngineIoSocket -> Async<unit>
     }
 
 type private RequestContext =
@@ -309,15 +268,6 @@ let private header name (req: HttpRequest) =
     req.headers
     |> List.tryFind (fun (key, _) -> key.Equals(name, StringComparison.InvariantCultureIgnoreCase))
     |> Option.map snd
-
-module private Option =
-    let parseInt s =
-        let ok, i = Int32.TryParse(s)
-        if ok then Some i else None
-
-    let parseIntAsBool s = parseInt s |> Option.map((<>) 0)
-
-    let defaultArg default' opt = defaultArg opt default'
 
 let private getContext (req: HttpRequest): RequestContext =
     {
@@ -380,13 +330,13 @@ let mutateField<'t when 't: not struct> (targetField: 't byref) (mutation: 't ->
         retry <- not (obj.ReferenceEquals(before, afterExchange))
 
 type EngineIo(config, app: EngineApp) =
-    let mutable sessions: Map<SocketId, InternalEngineIoSocket> = Map.empty
+    let mutable sessions: Map<SocketId, EngineIoSocket> = Map.empty
     let idGenerator = Base64Id.create config.RandomNumberGenerator
     
     let socketTimeout = config.PingTimeout + config.PingInterval
     
-    let socketClosed (socket: InternalEngineIoSocket) =
-        ll.info (eventX (sprintf "Removing session with ID %s" (socket.Id.ToString())))
+    let socketClosed (socket: EngineIoSocket) =
+        log.info (eventX (sprintf "Removing session with ID %s" (socket.Id.ToString())))
         mutateField &sessions (fun s -> s |> Map.remove socket.Id)
 
     let payloadToResponse sid payload engineCtx =
@@ -407,11 +357,11 @@ type EngineIo(config, app: EngineApp) =
             let socketIdString = idGenerator ()
             let socketId = SocketId socketIdString
 
-            let socket = new InternalEngineIoSocket(socketId, socketTimeout, socketClosed, app.handleSocket)
+            let socket = new EngineIoSocket(socketId, socketTimeout, socketClosed, app.handleSocket)
             mutateField &sessions (fun s -> s |> Map.add socket.Id socket)
             socket.Start()
             
-            ll.info (eventX (sprintf "Creating session with ID %s" socketIdString))
+            log.info (eventX (sprintf "Creating session with ID %s" socketIdString))
 
             let handshake = mkHandshake socketIdString config
             let payload = Payload(Open(handshake) :: config.InitialPackets)
@@ -456,7 +406,7 @@ type EngineIo(config, app: EngineApp) =
                     else
                         req.rawForm |> Text.Encoding.UTF8.GetString |> Payload.decodeFromString
                 for message in payload |> Payload.getMessages do
-                    ll.debug (eventX (sprintf "%s -> %A" sessionId message))
+                    log.debug (eventX (sprintf "%s -> %A" sessionId message))
                     socket.AddIncomming message
                 ok socket.Id
             | None ->
@@ -486,7 +436,7 @@ type EngineIo(config, app: EngineApp) =
 
 
 // Fixed in next Suave version, https://github.com/SuaveIO/suave/pull/575
-let removeBuggyCorsHeader: WebPart =
+let private removeBuggyCorsHeader: WebPart =
     fun ctx -> async {
         let finalHeaders =
             ctx.response.headers
@@ -496,7 +446,7 @@ let removeBuggyCorsHeader: WebPart =
     }
 
 // Adapted from https://github.com/socketio/socket.io/pull/1333
-let disableXSSProtectionForIE: WebPart =
+let private disableXSSProtectionForIE: WebPart =
     warbler (fun ctx ->
         let ua = ctx |> Headers.getFirstHeader "User-Agent"
         match ua with
@@ -505,8 +455,7 @@ let disableXSSProtectionForIE: WebPart =
         | _ -> succeed
     )
 
-let suaveEngineIo config handleSocket: WebPart =
-    let engine = new EngineIo(config, { handleSocket = handleSocket } )
+let suaveEngineIo (engine: EngineIo) config: WebPart =
     let corsConfig =
         { defaultCORSConfig with
             allowedMethods = InclusiveOption.None
