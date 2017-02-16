@@ -3,16 +3,17 @@
 open Expecto
 open FsCheck
 open SocketIoSuave
+open SocketIoSuave.EngineIo
 open SocketIoSuave.EngineIo.Protocol
 
 let binaryPacketRoundtrip packet =
-    let encoded = packet |> PacketMessage.encodeToBinary
-    let isBinary = packet |> PacketMessage.getData |> PacketContent.requireBinary
-    encoded |> PacketMessage.decodeFromBinary isBinary
+    let encoded = PacketMessageEncoder.encodeToBinary packet
+    let isBinary = PacketMessageEncoder.requireBinary packet
+    PacketMessageDecoder.decodeFromBinary isBinary encoded
 
 let stringPacketRoundtrip packet =
-    let encoded = packet |> PacketMessage.encodeToString
-    encoded |> PacketMessage.decodeFromString
+    let encoded = packet |> PacketMessageEncoder.encodeToString
+    encoded |> PacketMessageDecoder.decodeFromString
 
 let genArray = Gen.arrayOf Arb.generate<byte> |> Gen.filter (isNull >> not)
 let genSegment = Gen.map Segment.ofArray genArray
@@ -65,12 +66,12 @@ let properties =
             packetEqual p1 p2
 
         testPropertyWithConfig config "binary payload roundtrip" <| fun p1 ->
-            let encoded = p1 |> Payload.encodeToBinary
-            let p2 = encoded |> Payload.decodeFromBinary
+            let encoded = p1 |> PayloadEncoder.encodeToBinary
+            let p2 = encoded |> PayloadDecoder.decodeFromBinary
             payloadEqual p1 p2
 
         testPropertyWithConfig config "string payload roundtrip" <| fun p1 ->
-            let encoded = p1 |> Payload.encodeToString
-            let p2 = encoded |> Payload.decodeFromString
+            let encoded = p1 |> PayloadEncoder.encodeToString
+            let p2 = encoded |> PayloadDecoder.decodeFromString
             payloadEqual p1 p2
     ]

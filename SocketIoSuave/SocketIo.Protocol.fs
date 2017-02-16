@@ -37,8 +37,9 @@ type PartialPacket =
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
-module RawPacketType =
-    let toTypeId = function
+module private RawPacketType =
+    let inline toTypeId rawPacketType =
+        match rawPacketType with
         | Connect -> 0uy
         | Disconnect -> 1uy
         | Event -> 2uy
@@ -47,7 +48,8 @@ module RawPacketType =
         | BinaryEvent -> 5uy
         | BinaryAck -> 6uy
 
-    let fromTypeId = function
+    let inline fromTypeId typeId =
+        match typeId with
         | 0uy -> Connect
         | 1uy -> Disconnect
         | 2uy ->  Event
@@ -57,19 +59,22 @@ module RawPacketType =
         | 6uy -> BinaryAck
         | x -> failwithf "Invalid type ID %i" x
 
-    let isBinary = function
+    let inline isBinary rawPacketType =
+        match rawPacketType with
         | BinaryEvent -> true
         | BinaryAck -> true
         | _ -> false
 
-    let fromPacketType = function
+    let inline fromPacketType packetType =
+        match packetType with
         | PacketType.Connect -> Connect
         | PacketType.Disconnect -> Disconnect
         | PacketType.Event -> Event
         | PacketType.Ack -> Ack
         | PacketType.Error -> Error
 
-    let toPacketType = function
+    let inline toPacketType rawPacketType =
+        match rawPacketType with
         | Connect -> PacketType.Connect
         | Disconnect -> PacketType.Disconnect
         | Event -> PacketType.Event
@@ -78,7 +83,7 @@ module RawPacketType =
         | BinaryAck -> PacketType.Ack
         | Error ->PacketType. Error
 
-let private toRaw (packet: Packet) =
+let inline private toRaw (packet: Packet) =
     {
         Type = RawPacketType.fromPacketType packet.Type
         Namespace = Some (packet.Namespace)
@@ -87,7 +92,7 @@ let private toRaw (packet: Packet) =
         Attachments = None
     }
 
-let private fromRaw (packet: RawPacket) : Packet =
+let inline private fromRaw (packet: RawPacket) : Packet =
     {
         Type = RawPacketType.toPacketType packet.Type
         Namespace = match packet.Namespace with | None -> "/" | Some ns -> ns

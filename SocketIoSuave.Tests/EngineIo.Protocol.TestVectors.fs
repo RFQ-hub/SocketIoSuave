@@ -2,21 +2,22 @@
 
 open Expecto
 open SocketIoSuave
+open SocketIoSuave.EngineIo
 open SocketIoSuave.EngineIo.Protocol
 
 let private testPacketToBinary message expected format =
     let expected = expected |> Seq.map(byte) |> Seq.toArray
-    Expect.equal (message |> PacketMessage.encodeToBinary |> Segment.toArray) expected format
+    Expect.equal (message |> PacketMessageEncoder.encodeToBinary |> Segment.toArray) expected format
 
 let private testPacketToString message expected format =
-    Expect.equal (message |> PacketMessage.encodeToString) expected format
+    Expect.equal (message |> PacketMessageEncoder.encodeToString) expected format
 
 let private testPayloadToBinary messages (expected: int seq) format =
     let expected = expected |> Seq.map(byte) |> Seq.toArray
-    Expect.equal (Payload(messages) |> Payload.encodeToBinary |> Segment.toArray) expected format
+    Expect.equal (Payload(messages) |> PayloadEncoder.encodeToBinary |> Segment.toArray) expected format
 
 let private testPayloadToString messages expected format =
-    Expect.equal (Payload(messages) |> Payload.encodeToString) expected format
+    Expect.equal (Payload(messages) |> PayloadEncoder.encodeToString) expected format
 
 let utf8 (s: string) = System.Text.Encoding.ASCII.GetBytes(s) |> Array.map int
 let appendUtf8 s (arr: int seq) = Seq.concat [arr; utf8 s |> Seq.ofArray]

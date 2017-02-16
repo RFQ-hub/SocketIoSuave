@@ -378,15 +378,15 @@ type EngineIo(config, app: EngineApp) as this =
 
     let payloadToResponse sid payload engineCtx =
         if engineCtx.SupportsBinary then
-            bytesResponse HttpCode.HTTP_200 (payload |> Payload.encodeToBinary |> Segment.toArray)
+            bytesResponse HttpCode.HTTP_200 (payload |> PayloadEncoder.encodeToBinary |> Segment.toArray)
             |> setCookieSync' (mkCookie sid config)
             |> setUniqueHeader "Content-Type" "application/octet-stream"
-            |> setContentBytes (payload |> Payload.encodeToBinary |> Segment.toArray)
+            |> setContentBytes (payload |> PayloadEncoder.encodeToBinary |> Segment.toArray)
         else
-            bytesResponse HttpCode.HTTP_200 (payload |> Payload.encodeToString |> UTF8.bytes)
+            bytesResponse HttpCode.HTTP_200 (payload |> PayloadEncoder.encodeToString |> UTF8.bytes)
             |> setCookieSync' (mkCookie sid config)
             |> setUniqueHeader "Content-Type" "text/plain; charset=UTF-8"
-            |> setContentBytes (payload |> Payload.encodeToString |> System.Text.Encoding.UTF8.GetBytes)
+            |> setContentBytes (payload |> PayloadEncoder.encodeToString |> System.Text.Encoding.UTF8.GetBytes)
 
     let handleGet' engineCtx: AsyncResult<SocketId*Payload, Error> =
         match engineCtx.SessionId with
@@ -440,9 +440,9 @@ type EngineIo(config, app: EngineApp) as this =
             | Some(socket) ->
                 let payload =
                     if engineCtx.SupportsBinary then
-                        req.rawForm |> Segment.ofArray |> Payload.decodeFromBinary
+                        req.rawForm |> Segment.ofArray |> PayloadDecoder.decodeFromBinary
                     else
-                        req.rawForm |> Text.Encoding.UTF8.GetString |> Payload.decodeFromString
+                        req.rawForm |> Text.Encoding.UTF8.GetString |> PayloadDecoder.decodeFromString
                 for message in payload |> Payload.getMessages do
                     log.debug (eventX (sprintf "%s -> %A" sessionId message))
                     socket.AddIncomming message

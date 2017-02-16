@@ -43,6 +43,11 @@ type PacketMessage =
 type Payload =
     | Payload of PacketMessage list
 
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+[<RequireQualifiedAccess>]
+module Payload =
+    let getMessages = function | Payload m -> m
+
 type Transport =
     | Polling
     | Websocket
