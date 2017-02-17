@@ -3,6 +3,26 @@
 open SocketIoSuave
 open SocketIoSuave.EngineIo
 
+let private (|EqualsOrdinalIgnoreCase|_|) (expected: string) (s: string) =
+    if System.String.Equals(s, expected, System.StringComparison.OrdinalIgnoreCase) then
+        Some s
+    else
+        None
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Transport =
+    let fromString s =
+        match s with
+        | EqualsOrdinalIgnoreCase "polling" _ -> Some Polling
+        | EqualsOrdinalIgnoreCase "websocket" _-> Some Websocket
+        | _ -> None
+
+    let toString transport =
+        match transport with
+        | Polling -> "polling"
+        | Websocket -> "websocket"
+         
+
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module private PacketContent =
     let inline requireBinary content =
