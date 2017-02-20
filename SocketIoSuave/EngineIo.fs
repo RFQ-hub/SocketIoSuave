@@ -140,11 +140,10 @@ type private EngineIoSocket(id: SocketId, pingTimeout: TimeSpan, comms: SocketEn
                     this.AddOutgoing([Pong(data)])
                     return! loop messages currentReplyChan
                 | Open _ ->
-                    logWarn "[NewIncomming] Open received during communication"
+                    logWarn "Open received during communication"
                     return! loop messages currentReplyChan
                 | Upgrade ->
-                    // TODO
-                    logWarn "[NewIncomming] Upgrade received on an already open transport"
+                    logWarn "Upgrade received on an already open transport"
                     return! loop messages currentReplyChan
                 | Close -> this.Close()
                 | Message content ->
