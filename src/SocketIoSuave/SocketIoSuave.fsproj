@@ -60,6 +60,7 @@
     <Compile Include="SocketIo.fs" />
     <None Include="App.config" />
     <None Include="paket.references" />
+    <None Include="paket.template" />
   </ItemGroup>
   <PropertyGroup>
     <MinimumVisualStudioVersion Condition="'$(MinimumVisualStudioVersion)' == ''">11</MinimumVisualStudioVersion>

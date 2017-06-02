@@ -1,0 +1,21 @@
+type project
+id Itg.Ssf.SuaveSocketIo
+owners ITG
+authors ITG
+projectUrl
+    https://github.com/RFQ-hub/SuaveSocketIo
+licenseUrl
+    https://github.com/RFQ-hub/SuaveSocketIo/blob/master/LICENSE.md
+requireLicenseAcceptance
+    false
+copyright
+    Copyright ITG 2017
+summary
+    socket.io implementation for F# Suave webserver
+description
+    socket.io implementation for F# Suave webserver
+dependencies
+    Chessie >= 0.5.1
+    Suave >= 2.0.0
+    NewtonSoft.Json >= 7.0.1
+    FSharp.Core >= 4.0.0.1

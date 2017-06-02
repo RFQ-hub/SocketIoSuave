@@ -14,13 +14,15 @@ open BlackFox
 let configuration = "Release"
 let rootDir = Path.GetFullPath(__SOURCE_DIRECTORY__ </> "..")
 let artifactsDir = rootDir </> "artifacts"
+let sourceDir = rootDir </> "src"
 let mainBinDir = artifactsDir </> "bin" </> "SocketIoSuave" </> configuration
 
+let company = "ITG"
 let project = "SocketIoSuave"
 let summary = "socket.io implementation for F# Suave webserver"
 let solutionFile  = rootDir </> project + ".sln"
 let testAssemblies = artifactsDir </> "bin" </> "*.Tests" </> configuration </> "*.Tests.exe"
-let sourceProjects = rootDir </> "src/**/*.??proj"
+let packagedProjects = !! (rootDir </> "src/SocketIoSuave/*.??proj")
 
 /// The profile where the project is posted
 let gitOwner = "RFQ-hub"
@@ -72,7 +74,8 @@ task "AssemblyInfo" ["?Clean"] {
           Attribute.Product project
           Attribute.Description summary
           Attribute.Version release.AssemblyVersion
-          Attribute.FileVersion release.AssemblyVersion ]
+          Attribute.FileVersion release.AssemblyVersion
+          Attribute.Company company ]
 
     let getProjectDetails projectPath =
         let projectName = System.IO.Path.GetFileNameWithoutExtension(projectPath)
@@ -82,7 +85,7 @@ task "AssemblyInfo" ["?Clean"] {
           (getAssemblyInfoAttributes projectName)
         )
 
-    !! sourceProjects
+    packagedProjects
     |> Seq.map getProjectDetails
     |> Seq.iter (fun (projFileName, projectName, folderName, attributes) ->
         match projFileName with
@@ -129,25 +132,22 @@ task "Test" [ "Build"] {
 // the ability to step through the source code of external libraries http://ctaggart.github.io/SourceLink/
 
 open SourceLink
-let noSourceLink = hasBuildParam "NoSourceLink"
 
 task "SourceLink" [ "Build" ] {
-    if noSourceLink then
-        tracefn "Source link disabled"
-    else
-        let baseUrl = sprintf "%s/%s/{0}/%%var2%%" gitRaw gitName
-        tracefn "SourceLink base URL: %s" baseUrl
+    let baseUrl = sprintf "%s/%s/{0}/%%var2%%" gitRaw gitName
+    tracefn "SourceLink base URL: %s" baseUrl
 
-        !! sourceProjects
-        |> Seq.iter (fun projFile ->
-            let projectName = Path.GetFileNameWithoutExtension projFile
-            let proj = VsProj.LoadRelease projFile
-            tracefn "Generating SourceLink for %s on pdb: %s" projectName proj.OutputFilePdb
-            SourceLink.Index proj.CompilesNotLinked proj.OutputFilePdb rootDir baseUrl
-        )
+    packagedProjects
+    |> Seq.iter (fun projFile ->
+        let projectName = Path.GetFileNameWithoutExtension projFile
+        let proj = VsProj.LoadRelease projFile
+        tracefn "Generating SourceLink for %s on pdb: %s" projectName proj.OutputFilePdb
+        SourceLink.Index proj.CompilesNotLinked proj.OutputFilePdb rootDir baseUrl
+    )
 }
 
-let finalBinaries = if isMono then "Build" else "SourceLink"
+let noSourceLink = hasBuildParam "NoSourceLink"
+let finalBinaries = if isMono || noSourceLink then "Build" else "SourceLink"
 
 EmptyTask "FinalBinaries" [ finalBinaries ]
 
@@ -159,9 +159,8 @@ let zipPath = artifactsDir </> (sprintf "%s-%s.zip" project release.NugetVersion
 task "Zip" ["FinalBinaries"] {
     let comment = sprintf "%s v%s" project release.NugetVersion
     let files =
-        !! (mainBinDir </> "*.dll")
-        ++ (mainBinDir </> "*.config")
-        ++ (mainBinDir </> "*.exe")
+        !! (mainBinDir </> "SocketIoSuave*.dll")
+        ++ (mainBinDir </> "SocketIoSuave*.config")
     ZipHelper.CreateZip mainBinDir zipPath comment 9 false files
 
     AppVeyor.PushArtifact (fun p ->
@@ -181,7 +180,7 @@ task "NuGet" ["FinalBinaries"] {
             OutputPath = artifactsDir
             Version = release.NugetVersion
             ReleaseNotes = toLines release.Notes
-            WorkingDir = mainBinDir }
+            WorkingDir = sourceDir }
 
     !! (artifactsDir </> "*.nupkg")
     |> AppVeyor.PushArtifacts

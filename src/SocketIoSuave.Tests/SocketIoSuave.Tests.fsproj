@@ -48,7 +48,6 @@
     <Reference Include="System.Numerics" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="AssemblyInfo.fs" />
     <Compile Include="SegmentTests.fs" />
     <Compile Include="EngineIo.Protocol.TestVectors.fs" />
     <Compile Include="EngineIo.Protocol.FsCheck.fs" />
