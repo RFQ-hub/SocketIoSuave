@@ -50,6 +50,7 @@
     <Compile Include="AssemblyInfo.fs" />
     <Compile Include="AssemblyInfoAdditions.fs" />
     <Compile Include="Segment.fs" />
+    <Compile Include="Base64Id.fsi" />
     <Compile Include="Base64Id.fs" />
     <Compile Include="Option.fs" />
     <Compile Include="Choice.fs" />

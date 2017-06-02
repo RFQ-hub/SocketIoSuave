@@ -406,7 +406,7 @@ let inline private simpleResponse (code: HttpCode) (message: string) =
 
 /// Use CompareExchange to apply a mutation to a field.
 /// Mutation must be pure & writes to the field should be rare compared to reads.
-let mutateField<'t when 't: not struct> (targetField: 't byref) (mutation: 't -> 't) =
+let private mutateField<'t when 't: not struct> (targetField: 't byref) (mutation: 't -> 't) =
     let mutable retry = true
     while retry do
         let before = targetField

@@ -7,7 +7,6 @@ open System.Threading
 
 type IdGenerator = unit -> string
 
-/// Create a new ID generator using the specified RNG
 let create (rng: RandomNumberGenerator): IdGenerator =
     let buffer = new ThreadLocal<byte[]>(fun () -> Array.zeroCreate(15))
     let mutable sequenceNumber = 0
