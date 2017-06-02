@@ -1,3 +1,5 @@
+version 4.8.7
+
 source https://rfq-nuget-dev.wineur.itgeurope.com/nuget/nuget_org_cache/
 
 framework: >= net40
