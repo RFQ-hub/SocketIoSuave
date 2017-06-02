@@ -5,11 +5,10 @@ source https://nuget.org/api/v2
 framework: >= net40
 
 nuget FSharp.Core
-nuget Suave
-nuget NewtonSoft.Json
+nuget Suave >= 2.0.3
+nuget NewtonSoft.Json >= 7.0.1
 
-nuget RestSharp
-nuget Chessie
+nuget Chessie >= 0.5.1
 
 nuget Expecto
 nuget Expecto.BenchmarkDotNet

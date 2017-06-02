@@ -16,6 +16,6 @@ description
     socket.io implementation for Suave web server
 dependencies
     Chessie >= 0.5.1
-    Suave >= 2.0.0
+    Suave >= 2.0.3
     NewtonSoft.Json >= 7.0.1
     FSharp.Core >= 4.0.0.1
