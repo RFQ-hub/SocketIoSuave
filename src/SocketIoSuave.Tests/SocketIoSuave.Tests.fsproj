@@ -34,7 +34,7 @@
     <DebugType>pdbonly</DebugType>
     <Optimize>true</Optimize>
     <Tailcalls>true</Tailcalls>
-   <OutputPath>$(SolutionDir)\artifacts\bin\$(MSBuildProjectName)\$(Configuration)</OutputPath>
+    <OutputPath>$(SolutionDir)\artifacts\bin\$(MSBuildProjectName)\$(Configuration)</OutputPath>
     <DefineConstants>TRACE</DefineConstants>
     <WarningLevel>3</WarningLevel>
     <PlatformTarget>AnyCPU</PlatformTarget>

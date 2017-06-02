@@ -115,7 +115,7 @@ task "Build" ["AssemblyInfo"] {
 // --------------------------------------------------------------------------------------
 // Run the unit tests using test runner
 
-task "RunTests" [ "Build"] {
+task "Test" [ "Build"] {
     !! testAssemblies
         |> Expecto (fun p ->
             { p with
@@ -129,18 +129,22 @@ task "RunTests" [ "Build"] {
 // the ability to step through the source code of external libraries http://ctaggart.github.io/SourceLink/
 
 open SourceLink
+let noSourceLink = hasBuildParam "NoSourceLink"
 
 task "SourceLink" [ "Build" ] {
-    let baseUrl = sprintf "%s/%s/{0}/%%var2%%" gitRaw gitName
-    tracefn "SourceLink base URL: %s" baseUrl
+    if noSourceLink then
+        tracefn "Source link disabled"
+    else
+        let baseUrl = sprintf "%s/%s/{0}/%%var2%%" gitRaw gitName
+        tracefn "SourceLink base URL: %s" baseUrl
 
-    !! sourceProjects
-    |> Seq.iter (fun projFile ->
-        let projectName = Path.GetFileNameWithoutExtension projFile
-        let proj = VsProj.LoadRelease projFile
-        tracefn "Generating SourceLink for %s on pdb: %s" projectName proj.OutputFilePdb
-        SourceLink.Index proj.CompilesNotLinked proj.OutputFilePdb rootDir baseUrl
-    )
+        !! sourceProjects
+        |> Seq.iter (fun projFile ->
+            let projectName = Path.GetFileNameWithoutExtension projFile
+            let proj = VsProj.LoadRelease projFile
+            tracefn "Generating SourceLink for %s on pdb: %s" projectName proj.OutputFilePdb
+            SourceLink.Index proj.CompilesNotLinked proj.OutputFilePdb rootDir baseUrl
+        )
 }
 
 let finalBinaries = if isMono then "Build" else "SourceLink"
@@ -233,10 +237,10 @@ task "GitHubRelease" ["Zip"] {
 // --------------------------------------------------------------------------------------
 // Empty targets for readability
 
-EmptyTask "Default" ["RunTests"]
+EmptyTask "Default" ["Test"]
 EmptyTask "Packages" ["Zip"; "NuGet"]
 EmptyTask "Release" ["GitHubRelease"; "PublishNuget"]
-EmptyTask "CI" ["Clean"; "RunTests"; "Packages"]
+EmptyTask "CI" ["Clean"; "Test"; "Packages"]
 
 // --------------------------------------------------------------------------------------
 // Go! Go! Go!
