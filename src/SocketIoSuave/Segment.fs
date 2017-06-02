@@ -1,4 +1,5 @@
-﻿module internal SocketIoSuave.Segment
+﻿/// ArraySegment helpers
+module internal SocketIoSuave.Segment
 
 open System
 
