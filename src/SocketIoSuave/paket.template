@@ -11,9 +11,9 @@ requireLicenseAcceptance
 copyright
     Copyright ITG 2017
 summary
-    socket.io implementation for F# Suave webserver
+    Socket.IO implementation for Suave web server
 description
-    socket.io implementation for F# Suave webserver
+    socket.io implementation for Suave web server
 dependencies
     Chessie >= 0.5.1
     Suave >= 2.0.0

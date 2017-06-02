@@ -19,7 +19,7 @@ let mainBinDir = artifactsDir </> "bin" </> "SocketIoSuave" </> configuration
 
 let company = "ITG"
 let project = "SocketIoSuave"
-let summary = "socket.io implementation for F# Suave webserver"
+let summary = "Socket.IO implementation for Suave web server"
 let solutionFile  = rootDir </> project + ".sln"
 let testAssemblies = artifactsDir </> "bin" </> "*.Tests" </> configuration </> "*.Tests.exe"
 let packagedProjects = !! (rootDir </> "src/SocketIoSuave/*.??proj")
