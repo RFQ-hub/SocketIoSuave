@@ -8,5 +8,5 @@ cache:
   - "%LocalAppData%\\NuGet\\Cache -> paket.lock"
   - "paket-files -> paket.lock"
 build_script:
-  - ps: .\build.cmd CI
+  - ps: .\build.cmd CI NoSourceLink
 test: off
