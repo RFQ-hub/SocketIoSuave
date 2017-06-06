@@ -259,6 +259,7 @@
     <Compile Include="EngineIo.fs" />
     <Compile Include="SocketIo.Types.fs" />
     <Compile Include="SocketIo.Protocol.fs" />
+    <Compile Include="EmbededFiles.fs" />
     <Compile Include="SocketIo.fs" />
     <None Include="App.config" />
     <None Include="paket.references" />
