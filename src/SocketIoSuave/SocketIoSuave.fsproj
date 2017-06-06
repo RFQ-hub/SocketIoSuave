@@ -40,31 +40,6 @@
     <DocumentationFile>$(OutputPath)\SocketIoSuave.XML</DocumentationFile>
     <Prefer32Bit>true</Prefer32Bit>
   </PropertyGroup>
-  <ItemGroup>
-    <Reference Include="mscorlib" />
-    <Reference Include="System" />
-    <Reference Include="System.Core" />
-    <Reference Include="System.Numerics" />
-  </ItemGroup>
-  <ItemGroup>
-    <Compile Include="AssemblyInfo.fs" />
-    <Compile Include="AssemblyInfoAdditions.fs" />
-    <Compile Include="Segment.fs" />
-    <Compile Include="Base64Id.fsi" />
-    <Compile Include="Base64Id.fs" />
-    <Compile Include="Option.fs" />
-    <Compile Include="Choice.fs" />
-    <Compile Include="SuaveHelpers.fs" />
-    <Compile Include="EngineIo.Types.fs" />
-    <Compile Include="EngineIo.Protocol.fs" />
-    <Compile Include="EngineIo.fs" />
-    <Compile Include="SocketIo.Types.fs" />
-    <Compile Include="SocketIo.Protocol.fs" />
-    <Compile Include="SocketIo.fs" />
-    <None Include="App.config" />
-    <None Include="paket.references" />
-    <None Include="paket.template" />
-  </ItemGroup>
   <PropertyGroup>
     <MinimumVisualStudioVersion Condition="'$(MinimumVisualStudioVersion)' == ''">11</MinimumVisualStudioVersion>
   </PropertyGroup>
@@ -270,4 +245,31 @@
       </ItemGroup>
     </When>
   </Choose>
+  <ItemGroup>
+    <Compile Include="AssemblyInfo.fs" />
+    <Compile Include="AssemblyInfoAdditions.fs" />
+    <Compile Include="Segment.fs" />
+    <Compile Include="Base64Id.fsi" />
+    <Compile Include="Base64Id.fs" />
+    <Compile Include="Option.fs" />
+    <Compile Include="Choice.fs" />
+    <Compile Include="SuaveHelpers.fs" />
+    <Compile Include="EngineIo.Types.fs" />
+    <Compile Include="EngineIo.Protocol.fs" />
+    <Compile Include="EngineIo.fs" />
+    <Compile Include="SocketIo.Types.fs" />
+    <Compile Include="SocketIo.Protocol.fs" />
+    <Compile Include="SocketIo.fs" />
+    <None Include="App.config" />
+    <None Include="paket.references" />
+    <None Include="paket.template" />
+    <EmbeddedResource Include="socket.io.js" />
+    <EmbeddedResource Include="socket.io.js.map" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="mscorlib" />
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Numerics" />
+  </ItemGroup>
 </Project>

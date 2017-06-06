@@ -154,6 +154,44 @@ type private SocketIoSocket(engineSocket: IEngineIoSocket, handlePackets: ISocke
         member __.Broadcast(packet) = broadcast packet
         member __.Close() = this.Close()
 
+module private EmbededFiles =
+    open System.IO
+    open System.Reflection
+
+    let getResource name = 
+        use stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(name);
+        use memStream = new MemoryStream(int stream.Length)
+        stream.CopyTo(memStream)
+        memStream.ToArray()
+    
+    type Resource = { fileName: string; mimeType: string; bytes: Lazy<byte[]> }
+
+    let resources =
+        [
+            "socket.io.js", "application/javascript"
+            "socket.io.js.map", "application/json"
+        ]
+        |> List.map(fun (fileName, mimeType) ->
+            {
+                fileName = fileName
+                mimeType = mimeType
+                bytes = lazy (getResource fileName)
+            }
+        )
+
+    let sendResource res: WebPart = fun ctx ->
+        {
+            ctx with response = { ctx.response with content = Bytes res.bytes.Value; status = HTTP_200.status }
+        } |> Some |> Async.result
+        
+
+    let handleInPath (basePath: string) =
+        let basePath = if basePath.EndsWith("/") then basePath else basePath + "/"
+        choose (resources |> List.map(fun res ->
+            Filters.path (basePath + res.fileName)
+            >=> Writers.setMimeType res.mimeType
+            >=> sendResource res))
+
 type SocketIo(handlePackets: ISocketIoSocket -> Async<unit>) =
     let initPacket = { Packet.Type = PacketType.Connect; Namespace = "/"; EventId = None; Data = [] }
     let engineConfig =
@@ -168,7 +206,11 @@ type SocketIo(handlePackets: ISocketIoSocket -> Async<unit>) =
 
     let engine = new EngineIo(engineConfig, { handleSocket = handleSocket } )
 
-    let handle: WebPart = suaveEngineIo engine engineConfig
+    let handle: WebPart =
+        choose [
+            EmbededFiles.handleInPath engineConfig.Path
+            suaveEngineIo engine engineConfig
+        ]
 
     /// Version of the socket.io protocol
     member val Version = Protocol.version

@@ -519,7 +519,9 @@ type EngineIo(config, app: EngineApp) as this =
         | GET, Some(Websocket) ->
             handShake (handleWebsocket engineCtx) ctx
         | _ ->
-            log.info (eventX "???")
+            log.warn (eventX "Unknown request (method={method}, transport={transport})"
+                >> setField "method" ctx.request.``method``
+                >> setField "transport" engineCtx.Transport)
             Async.result None
 
     member val WebPart = handle
