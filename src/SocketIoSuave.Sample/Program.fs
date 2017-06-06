@@ -5,6 +5,7 @@ open Suave.Operators
 open SocketIoSuave.EngineIo.Protocol
 open SocketIoSuave
 open System.Security.Cryptography
+open Suave.Filters
 open Suave.Logging
 open Suave.Logging.Message
 open SocketIoSuave.EngineIo
@@ -12,6 +13,8 @@ open SocketIoSuave.SocketIo
 open SocketIoSuave.SocketIo.Engine
 open System.Collections.Generic
 open System.Threading.Tasks
+open System.IO
+open Suave.Files
 
 let handlePacket (packet: PacketMessage) =
     printfn "Received: %A" packet
@@ -50,8 +53,17 @@ let main argv =
             //serveEngineIo { EngineIoConfig.empty with Path = "/socket.io/"; InitialPackets = initialPackets }
             socketio handlePacket
             // serveSocketIo emptySocketIoConfig
-            Successful.OK "Hello World!"
+            GET >=> choose [
+                browseHome
+            
+                path "/" >=> browseFileHome "index.html"
+            ]
+
+            RequestErrors.NOT_FOUND "File not found"
         ]
-    let suaveConf = { defaultConfig with logger = log }
+
+    let assemblyPath = Uri(System.Reflection.Assembly.GetExecutingAssembly().GetName().CodeBase).LocalPath
+    let publicPath = Path.Combine(Path.GetDirectoryName(assemblyPath), "public")
+    let suaveConf = { defaultConfig with logger = log; homeFolder = Some publicPath }
     startWebServer suaveConf app
     0
