@@ -154,8 +154,6 @@ type private SocketIoSocket(engineSocket: IEngineIoSocket, handlePackets: ISocke
         member __.Broadcast(packet) = broadcast packet
         member __.Close() = this.Close()
 
-
-
 type SocketIo(handlePackets: ISocketIoSocket -> Async<unit>) =
     let initPacket = { Packet.Type = PacketType.Connect; Namespace = "/"; EventId = None; Data = [] }
     let engineConfig =
@@ -182,4 +180,4 @@ type SocketIo(handlePackets: ISocketIoSocket -> Async<unit>) =
 
     member __.Broadcast(packet: Packet) =
         let content = Protocol.PacketEncoder.encode packet
-        engine.Broadcast(content)
+        engine.Broadcast(None, content)

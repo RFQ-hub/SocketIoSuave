@@ -95,7 +95,7 @@ type private OutgoingCommunication =
 type private SocketEngineCommunication =
     {
         socketClosing: SocketId -> unit
-        broadcast: PacketContent seq -> unit
+        broadcast: (SocketId option) *  (PacketContent seq) -> unit
     }
 
 type private EngineIoSocket(id: SocketId, pingTimeout: TimeSpan, comms: SocketEngineCommunication, handleSocket: IEngineIoSocket -> Async<unit>) as this =
@@ -324,8 +324,8 @@ type private EngineIoSocket(id: SocketId, pingTimeout: TimeSpan, comms: SocketEn
         member __.Read() = this.ReadIncomming()
         member __.Send(messages: PacketContent seq) = this.Send(messages)
         member __.Send(message: PacketContent) = this.Send(message)
-        member __.Broadcast(messages: PacketContent seq) = comms.broadcast messages
-        member __.Broadcast(message: PacketContent) = comms.broadcast ([message] :> _ seq)
+        member __.Broadcast(messages: PacketContent seq) = comms.broadcast (Some this.Id, messages)
+        member __.Broadcast(message: PacketContent) = comms.broadcast (Some this.Id, ([message] :> _ seq))
         member __.Close() = this.Close()
 
 let inline private badAsync err = Async.result (Bad [err]) |> AR
@@ -527,13 +527,17 @@ type EngineIo(config, app: EngineApp) as this =
     member val WebPart = handle
 
     /// Send the same packets to every session
-    member __.Broadcast(messages: PacketContent seq) =
+    member __.Broadcast(exceptSocket: SocketId option, messages: PacketContent seq) =
         let messages' = List.ofSeq messages
-        sessions |> Map.iter (fun _ socket -> socket.Send(messages'))
+        sessions |> Map.iter (fun socketId socket ->
+            if Some socketId <> exceptSocket then
+                socket.Send(messages'))
 
     /// Send the same packet to every session
-    member __.Broadcast(message: PacketContent) =
-        sessions |> Map.iter (fun _ socket -> socket.Send(message))
+    member __.Broadcast(exceptSocket: SocketId option, message: PacketContent) =
+        sessions |> Map.iter (fun socketId socket ->
+            if Some socketId <> exceptSocket then
+                socket.Send(message))
 
 // Fixed in next Suave version, https://github.com/SuaveIO/suave/pull/575
 let private removeBuggyCorsHeader: WebPart =
