@@ -1,5 +1,5 @@
 ﻿/// Generate Base64 unique IDs similar to socket.io
-module SocketIoSuave.Base64Id
+module Base64Id
 
 open System
 open System.Security.Cryptography

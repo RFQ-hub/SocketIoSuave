@@ -1,4 +1,4 @@
-﻿module SocketIoSuave.Base64Id
+﻿module Base64Id
 
 open System.Security.Cryptography
 

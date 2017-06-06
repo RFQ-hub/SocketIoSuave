@@ -54,6 +54,7 @@
     <Compile Include="Base64Id.fs" />
     <Compile Include="Option.fs" />
     <Compile Include="Choice.fs" />
+    <Compile Include="SuaveHelpers.fs" />
     <Compile Include="EngineIo.Types.fs" />
     <Compile Include="EngineIo.Protocol.fs" />
     <Compile Include="EngineIo.fs" />

@@ -12,6 +12,7 @@ https://github.com/ocharles/engine.io
 
 open System
 
+/// Part of a byte[]
 type ByteSegment = ArraySegment<byte>
 
 /// Content of a engine.io packet, text, binary data or empty
@@ -23,6 +24,7 @@ type PacketContent =
     /// Binary packet content (Transfered either directly or as Base64 depending on transport)
     | BinaryPacket of ByteSegment
 
+/// Initial message sent when a new transport is opened
 type OpenHandshake =
     {
         Sid: string
@@ -31,15 +33,30 @@ type OpenHandshake =
         PingInterval: int
     }
 
+/// Messages that can be transmited on an Engine.IO connection
 type PacketMessage =
+    /// Sent from the server when a new transport is opened
     | Open of OpenHandshake
+
+    /// Request the close of this transport but does not shutdown the connection itself
     | Close
+
+    /// Sent by the client. Server should answer with a pong packet containing the same data
     | Ping of PacketContent
+
+    /// Sent by the server to respond to ping packets
     | Pong of PacketContent
+
+    /// Actual message
     | Message of PacketContent
+
+    /// Request an upgrade to this protocol
     | Upgrade
+    
+    /// Does nothing.
     | Noop
 
+/// A list of packets
 type Payload =
     | Payload of PacketMessage list
 
@@ -48,6 +65,10 @@ type Payload =
 module Payload =
     let getMessages = function | Payload m -> m
 
+/// The transport being used to transmit Engine.IO packets
 type Transport =
+    /// Communication via polling, either XHR for recent browsers or JSONP for old ones
     | Polling
+
+    /// Communication via websocket
     | Websocket

@@ -17,6 +17,7 @@ open System.Threading.Tasks
 open SocketIoSuave
 open SocketIoSuave.EngineIo
 open SocketIoSuave.EngineIo.Protocol
+open SocketIoSuave.SuaveHelpers
 
 let private log = Log.create "engine.io"
 
@@ -344,16 +345,6 @@ type private RequestContext =
         IsBinary: bool
     }
 
-let private queryParam name (req: HttpRequest) =
-    req.query
-    |> List.tryFind (fun (key, _) -> key.Equals(name, StringComparison.InvariantCultureIgnoreCase))
-    |> Option.bind snd
-
-let private header name (req: HttpRequest) =
-    req.headers
-    |> List.tryFind (fun (key, _) -> key.Equals(name, StringComparison.InvariantCultureIgnoreCase))
-    |> Option.map snd
-
 let private getContext (req: HttpRequest): RequestContext =
     {
         Transport = req |> queryParam "transport" |> Option.bind(Transport.fromString)
@@ -362,47 +353,6 @@ let private getContext (req: HttpRequest): RequestContext =
         SupportsBinary = req |> queryParam "b64" |> Option.bind Option.parseIntAsBool |> Option.defaultArg false
         IsBinary = req |> header "content-type" = Some "application/octet-stream"
     }
-
-let private setCookieSync (cookie : HttpCookie) (response: HttpResult) =
-    let notSetCookie : string * string -> bool =
-        fst >> (String.equalsOrdinalCI Headers.Fields.Response.setCookie >> not)
-
-    let cookieHeaders =
-        response.cookies
-        |> Map.put cookie.name cookie // possibly overwrite
-        |> Map.toList
-        |> List.map (snd >> HttpCookie.toHeader)
-
-    let headers' =
-      cookieHeaders
-      |> List.fold (fun headers header ->
-          (Headers.Fields.Response.setCookie, header) :: headers)
-          (response.headers |> List.filter notSetCookie)
-
-    { response with headers = headers' }
-
-let private setCookieSync' (cookie : HttpCookie option) (response: HttpResult) =
-    match cookie with
-    | Some cookie -> setCookieSync cookie response
-    | None -> response
-
-let inline private setHeader name value response =
-    let headers = (name, value)::response.headers
-    { response with headers = headers }
-
-let inline private setUniqueHeader name value response =
-    let headers = response.headers |> List.filter (fun (headerName, _) -> not (String.equalsOrdinalCI headerName name) )
-    let headers = (name, value)::headers
-    { response with headers = headers }
-
-let inline private setContentBytes bytes response =
-    { response with content = HttpContent.Bytes bytes}
-
-let inline private bytesResponse (code: HttpCode) (bytes: byte[]) =
-    { status = code.status; headers = []; content = Bytes bytes; writePreamble = true }
-
-let inline private simpleResponse (code: HttpCode) (message: string) =
-    bytesResponse code (UTF8.bytes message)
 
 /// Use CompareExchange to apply a mutation to a field.
 /// Mutation must be pure & writes to the field should be rare compared to reads.
@@ -474,7 +424,7 @@ type EngineIo(config, app: EngineApp) as this =
             | None ->
                 badAsync UnknownSessionId
 
-    let errorsToHttp (result:Result<HttpResult, Error>): HttpResult =
+    let resultToHttp (result:Result<HttpResult, Error>): HttpResult =
         match result with 
         | Ok(response, _) -> response
         | Bad(errors) ->
@@ -531,7 +481,8 @@ type EngineIo(config, app: EngineApp) as this =
                         // If we're already in websocket mode we enqueue the received message
                         socket.AddIncomming(packetMessage)
                     | _ ->
-                        // Otherwise we only handle a small subset of messages
+                        // Otherwise we only handle a small subset of messages to allow browsers to detect that we
+                        // support websocket correctly and ask for an upgrade
                         match packetMessage with
                         | Ping pingData when pingData = TextPacket "probe" ->
                             let answer = PacketMessageEncoder.encodeToString (Pong pingData) |> UTF8.bytes |> Segment.ofArray
@@ -558,12 +509,12 @@ type EngineIo(config, app: EngineApp) as this =
         let engineCtx = getContext ctx.request
         match ctx.request.``method``, engineCtx.Transport with
         | POST, Some(Polling) ->
-            handlePost engineCtx ctx.request |> errorsToHttp |> returnResponse ctx |> Async.result
+            handlePost engineCtx ctx.request |> resultToHttp |> returnResponse ctx |> Async.result
         | GET, Some(Polling) ->
             let engineCtx = getContext ctx.request
             async {
                 let! result = handleGet engineCtx |> Async.ofAsyncResult
-                return returnResponse ctx (errorsToHttp result)
+                return returnResponse ctx (resultToHttp result)
             }
         | GET, Some(Websocket) ->
             handShake (handleWebsocket engineCtx) ctx
@@ -571,12 +522,14 @@ type EngineIo(config, app: EngineApp) as this =
             log.info (eventX "???")
             Async.result None
 
-    member val Handle = handle
+    member val WebPart = handle
 
+    /// Send the same packets to every session
     member __.Broadcast(messages: PacketContent seq) =
         let messages' = List.ofSeq messages
         sessions |> Map.iter (fun _ socket -> socket.Send(messages'))
 
+    /// Send the same packet to every session
     member __.Broadcast(message: PacketContent) =
         sessions |> Map.iter (fun _ socket -> socket.Send(message))
 
@@ -610,7 +563,7 @@ let suaveEngineIo (engine: EngineIo) config: WebPart =
         Filters.pathStarts config.Path
             >=>
             choose [
-                engine.Handle
+                engine.WebPart
                 RequestErrors.BAD_REQUEST "O_o"
             ]
             >=> cors corsConfig
