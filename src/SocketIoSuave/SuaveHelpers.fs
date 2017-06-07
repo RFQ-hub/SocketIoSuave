@@ -3,6 +3,8 @@
 open Suave
 open Suave.Cookie
 open System
+open Suave.Logging
+open Suave.Sockets
 
 let queryParam name (req: HttpRequest) =
     req.query
@@ -54,3 +56,12 @@ let inline bytesResponse (code: HttpCode) (bytes: byte[]) =
 
 let inline simpleResponse (code: HttpCode) (message: string) =
     bytesResponse code (UTF8.bytes message)
+
+/// Set the log field `name` with a textual description of the socket error
+let setSocketErrorLogField name error =
+    match error with
+    | SocketError socketError -> Message.setFieldValue name (sprintf "%O" socketError)
+    | InputDataError (code, message) ->
+        let code = defaultArg code 400
+        Message.setFieldValue name (sprintf "%i: %s" code message)
+    | ConnectionError message -> Message.setFieldValue name message

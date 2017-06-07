@@ -21,16 +21,23 @@ type SocketIoConfig =
         EngineConfig: EngineIoConfig
     }
 
+let initialPackets =
+    { Packet.Type = PacketType.Connect; Namespace = "/"; EventId = None; Data = [] }
+    |> PacketEncoder.encode
+    |> List.map Message
+
 let emptySocketIoConfig =
     {
         EngineConfig =
             { EngineIoConfig.empty with
                 Path = "/socket.io/"
-                InitialPackets = { Packet.Type = PacketType.Connect; Namespace = "/"; EventId = None; Data = [] } |> PacketEncoder.encode |> List.map Message
+                InitialPackets = initialPackets
+                PingInterval = TimeSpan.FromSeconds(3.)
+                PingTimeout = TimeSpan.FromSeconds(10.)
             }
     }
 
-let private log = Log.create "socket.io"
+let private log = Log.create "SocketIoSuave.SocketIo"
 
 /// A connected Socket.IO socket
 type ISocketIoSocket =

@@ -19,7 +19,7 @@ open SocketIoSuave.EngineIo
 open SocketIoSuave.EngineIo.Protocol
 open SocketIoSuave.SuaveHelpers
 
-let private log = Log.create "engine.io"
+let private log = Log.create "SocketIoSuave.EngineIo"
 
 type SocketId = SocketId of string
 with
@@ -99,10 +99,10 @@ type private SocketEngineCommunication =
     }
 
 type private EngineIoSocket(id: SocketId, pingTimeout: TimeSpan, comms: SocketEngineCommunication, handleSocket: IEngineIoSocket -> Async<unit>) as this =
-    let logVerbose s = log.debug (eventX (sprintf "engine {socketId}: %s" s) >> setField "socketId" (id.ToString()))
-    let logError s = log.error (eventX (sprintf "engine {socketId}: %s" s) >> setField "socketId" (id.ToString()))
-    let logDebug s = log.debug (eventX (sprintf "engine {socketId}: %s" s) >> setField "socketId" (id.ToString()))
-    let logWarn s = log.warn (eventX (sprintf "engine {socketId}: %s" s) >> setField "socketId" (id.ToString()))
+    let logVerbose s = log.debug (eventX (sprintf "{socketId} %s" s) >> setField "socketId" (id.ToString()))
+    let logError s = log.error (eventX (sprintf "{socketId} %s" s) >> setField "socketId" (id.ToString()))
+    let logDebug s = log.debug (eventX (sprintf "{socketId} %s" s) >> setField "socketId" (id.ToString()))
+    let logWarn s = log.warn (eventX (sprintf "{socketId} %s" s) >> setField "socketId" (id.ToString()))
     
     let closeLock = new obj()
     let mutable closed = false
@@ -340,7 +340,7 @@ type private RequestContext =
     {
         Transport: Transport option
         JsonPIndex: int option
-        SessionId: string option
+        SocketId: string option
         SupportsBinary: bool
         IsBinary: bool
     }
@@ -349,7 +349,7 @@ let private getContext (req: HttpRequest): RequestContext =
     {
         Transport = req |> queryParam "transport" |> Option.bind(Transport.fromString)
         JsonPIndex = req |> queryParam "j" |> Option.bind Option.parseInt
-        SessionId = req |> queryParam "sid"
+        SocketId = req |> queryParam "sid"
         SupportsBinary = req |> queryParam "b64" |> Option.bind Option.parseIntAsBool |> Option.defaultArg false
         IsBinary = req |> header "content-type" = Some "application/octet-stream"
     }
@@ -371,12 +371,12 @@ type EngineIo(config, app: EngineApp) as this =
     let socketTimeout = config.PingTimeout + config.PingInterval
     
     let tryGetSocket engineCtx =
-        engineCtx.SessionId
+        engineCtx.SocketId
         |> Option.map SocketId
         |> Option.bind (fun socketId -> Map.tryFind socketId sessions)
 
     let removeSocket (socketId: SocketId) =
-        log.info (eventX (sprintf "Removing session with ID %s" (socketId.ToString())))
+        log.info (eventX "{socketId} Disconnected, removing session" >> Message.setFieldValue "socketId" socketId)
         mutateField &sessions (fun s -> s |> Map.remove socketId)
 
     let socketCommunications =
@@ -398,7 +398,7 @@ type EngineIo(config, app: EngineApp) as this =
             |> setContentBytes (payload |> PayloadEncoder.encodeToString |> System.Text.Encoding.UTF8.GetBytes)
 
     let handleGet' engineCtx: AsyncResult<SocketId*Payload, Error> =
-        match engineCtx.SessionId with
+        match engineCtx.SocketId with
         | None ->
             let socketIdString = idGenerator ()
             let socketId = SocketId socketIdString
@@ -407,7 +407,7 @@ type EngineIo(config, app: EngineApp) as this =
             mutateField &sessions (fun s -> s |> Map.add socket.Id socket)
             socket.Start()
             
-            log.info (eventX (sprintf "Creating session with ID %s" socketIdString))
+            log.info (eventX "{socketId} Connected, creating session" >> Message.setFieldValue "socketId" socketId)
 
             let handshake = mkHandshake socketIdString config
             let payload = Payload(Open(handshake) :: config.InitialPackets)
@@ -418,7 +418,10 @@ type EngineIo(config, app: EngineApp) as this =
             | Some(socket) -> asyncTrial {
                 let! payload = socket.ReadOutgoing ()
                 let payload' = defaultArg payload (Payload([]))
-                log.debug (eventX (sprintf "%s <- %A" sessionId (Payload.getMessages payload')))
+                log.verbose (eventX "{socketId} Http GET <- {messages}"
+                    >> Message.setFieldValue "socketId" sessionId
+                    >> Message.setFieldValue "messages"(Payload.getMessages payload'))
+
                 return socketId, payload'
                 }
             | None ->
@@ -464,45 +467,70 @@ type EngineIo(config, app: EngineApp) as this =
     let returnResponse ctx response =
         Some { ctx with response = response }
 
-    let handleWebsocket (engineCtx: RequestContext) (webSocket : WebSocket) (context: HttpContext) = socket {
-        let mutable loop = true
+    let handleWebsocket (engineCtx: RequestContext) (webSocket : WebSocket) (context: HttpContext) = async {
+        match engineCtx.SocketId with
+        | Some sessionId ->
+            let mutable loop = true
 
-        while loop do
-            let! msg = webSocket.read()
+            while loop do
+                let! readResponse = webSocket.read()
 
-            match msg with
-            | (Text, data, true) ->
                 match tryGetSocket engineCtx with
-                | Some(socket) ->
-                    let str = UTF8.toString data
-                    let packetMessage = PacketMessageDecoder.decodeFromString str
-                    match socket.Transport with
-                    | Websocket ->
-                        // If we're already in websocket mode we enqueue the received message
-                        socket.AddIncomming(packetMessage)
-                    | _ ->
-                        // Otherwise we only handle a small subset of messages to allow browsers to detect that we
-                        // support websocket correctly and ask for an upgrade
-                        match packetMessage with
-                        | Ping pingData when pingData = TextPacket "probe" ->
-                            let answer = PacketMessageEncoder.encodeToString (Pong pingData) |> UTF8.bytes |> Segment.ofArray
-                            do! webSocket.send Text answer true
-                            socket.StartUpgrade(webSocket)
-                        | Upgrade ->
-                            socket.FinishUpgrade()
-                        | _ -> ()
-                        
-                | None -> 
+                | None ->
+                    log.debug (eventX "{socketId} Received WebSocket message for already closed socket"
+                        >> Message.setFieldValue "socketId" sessionId)
                     loop <- false
-            | (Binary, data, true) ->
-                printf "Binary !"
-                ()
-            | (Opcode.Close, _, _) ->
-                let emptyResponse = [||] |> ByteSegment
-                do! webSocket.send Opcode.Close emptyResponse true
-                loop <- false
+                | Some socket -> 
+                    match readResponse with
+                    | Choice1Of2 msg -> 
+                        match msg with
+                        | (Text, data, true) ->
+                            let str = UTF8.toString data
+                            let packetMessage = PacketMessageDecoder.decodeFromString str
+                            match socket.Transport with
+                            | Websocket ->
+                                log.verbose (eventX "{socketId} WebSocket <- {messages}"
+                                    >> Message.setFieldValue "socketId" sessionId
+                                    >> Message.setFieldValue "messages" packetMessage)
 
-            | _ -> ()
+                                // If we're already in websocket mode we enqueue the received message
+                                socket.AddIncomming(packetMessage)
+                            | _ ->
+                                // Otherwise we only handle a small subset of messages to allow browsers to detect that we
+                                // support websocket correctly and ask for an upgrade
+                                match packetMessage with
+                                | Ping pingData when pingData = TextPacket "probe" ->
+                                    let answer = PacketMessageEncoder.encodeToString (Pong pingData) |> UTF8.bytes |> Segment.ofArray
+                                    do! (webSocket.send Text answer true |> Async.Ignore)
+                                    socket.StartUpgrade(webSocket)
+                                | Upgrade ->
+                                    socket.FinishUpgrade()
+                                | _ -> ()
+                        | (Binary, data, true) ->
+                            log.error (eventX "{socketId} Binary WebSocket data received, this case is not supported yet"
+                                >> Message.setFieldValue "socketId" sessionId)
+                            ()
+                        | (Opcode.Close, _, _) ->
+                            log.debug (eventX "{socketId} WebSocket Close received, closing socket"
+                                >> Message.setFieldValue "socketId" sessionId)
+                            
+                            do! (webSocket.send Opcode.Close Segment.empty true |> Async.Ignore)
+                            socket.Close()
+                            loop <- false
+                        | msg ->
+                            log.warn (eventX "{socketId} Unhandled message received: {msg}"
+                                >> Message.setFieldValue "socketId" sessionId
+                                >> Message.setFieldValue "msg" msg)
+                            ()
+                    | Choice2Of2 err ->
+                        log.debug (eventX "{socketId} Error received on session WebSocket, closing: {error}"
+                            >> Message.setFieldValue "socketId" sessionId
+                            >> setSocketErrorLogField "error" err)
+                        socket.Close()
+                        loop <- false
+            return Choice1Of2 ()
+        | None ->
+            return! webSocket.send Opcode.Close Segment.empty true
     }
 
     let handle: WebPart = fun ctx ->
