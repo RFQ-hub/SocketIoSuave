@@ -32,11 +32,21 @@ let emptySocketIoConfig =
 
 let private log = Log.create "socket.io"
 
+/// A connected Socket.IO socket
 type ISocketIoSocket =
+    /// Get the current socket Id
     abstract member Id: SocketId with get
+    
+    /// Receive the next packet on the socket, or None if the socket disconnected
     abstract member Receive: unit -> Async<Packet option>
+    
+    /// Send a packet to the current socket
     abstract member Send: Packet -> unit
+    
+    /// Send a packet to all other connected sockets
     abstract member Broadcast: Packet -> unit
+    
+    /// Request to close the socket
     abstract member Close: unit -> unit
 
 type private IncomingCommunication =
@@ -178,6 +188,7 @@ type SocketIo(handlePackets: ISocketIoSocket -> Async<unit>) =
     member val Version = Protocol.version
     member val WebPart = handle
 
+    /// Broadcast the same packet to every connected client
     member __.Broadcast(packet: Packet) =
         let content = Protocol.PacketEncoder.encode packet
         engine.Broadcast(None, content)
