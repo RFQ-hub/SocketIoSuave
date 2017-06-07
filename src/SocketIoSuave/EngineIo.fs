@@ -467,68 +467,74 @@ type EngineIo(config, app: EngineApp) as this =
     let returnResponse ctx response =
         Some { ctx with response = response }
 
+    let handleWebsocketCore (engineCtx: RequestContext) (webSocket : WebSocket) (context: HttpContext) (sessionId: string) = socket {
+        let mutable loop = true
+
+        while loop do
+            let! msg = webSocket.read()
+
+            match tryGetSocket engineCtx with
+            | None ->
+                loop <- false
+            | Some socket -> 
+                match msg with
+                | (Text, data, true) ->
+                    let str = UTF8.toString data
+                    let packetMessage = PacketMessageDecoder.decodeFromString str
+                    match socket.Transport with
+                    | Websocket ->
+                        log.verbose (eventX "{socketId} WebSocket <- {messages}"
+                            >> Message.setFieldValue "socketId" sessionId
+                            >> Message.setFieldValue "messages" packetMessage)
+
+                        // If we're already in websocket mode we enqueue the received message
+                        socket.AddIncomming(packetMessage)
+                    | _ ->
+                        // Otherwise we only handle a small subset of messages to allow browsers to detect that we
+                        // support websocket correctly and ask for an upgrade
+                        match packetMessage with
+                        | Ping pingData when pingData = TextPacket "probe" ->
+                            let answer = PacketMessageEncoder.encodeToString (Pong pingData) |> UTF8.bytes |> Segment.ofArray
+                            do! webSocket.send Text answer true
+                            socket.StartUpgrade(webSocket)
+                        | Upgrade ->
+                            socket.FinishUpgrade()
+                        | _ -> ()
+                | (Binary, data, true) ->
+                    log.error (eventX "{socketId} Binary WebSocket data received, this case is not supported yet"
+                        >> Message.setFieldValue "socketId" sessionId)
+                    ()
+                | (Opcode.Close, _, _) ->
+                    log.debug (eventX "{socketId} WebSocket Close received, closing socket"
+                        >> Message.setFieldValue "socketId" sessionId)
+                            
+                    do! webSocket.send Opcode.Close Segment.empty true
+                    socket.Close()
+                    loop <- false
+                | msg ->
+                    log.warn (eventX "{socketId} Unhandled message received: {msg}"
+                        >> Message.setFieldValue "socketId" sessionId
+                        >> Message.setFieldValue "msg" msg)
+                    ()
+    }
+
     let handleWebsocket (engineCtx: RequestContext) (webSocket : WebSocket) (context: HttpContext) = async {
         match engineCtx.SocketId with
-        | Some sessionId ->
-            let mutable loop = true
-
-            while loop do
-                let! readResponse = webSocket.read()
-
+        | Some socketId ->
+            let! coreResult = handleWebsocketCore engineCtx webSocket context socketId
+        
+            match coreResult with
+            | Choice1Of2 _ -> ()
+            | Choice2Of2 err ->
                 match tryGetSocket engineCtx with
-                | None ->
-                    log.debug (eventX "{socketId} Received WebSocket message for already closed socket"
-                        >> Message.setFieldValue "socketId" sessionId)
-                    loop <- false
-                | Some socket -> 
-                    match readResponse with
-                    | Choice1Of2 msg -> 
-                        match msg with
-                        | (Text, data, true) ->
-                            let str = UTF8.toString data
-                            let packetMessage = PacketMessageDecoder.decodeFromString str
-                            match socket.Transport with
-                            | Websocket ->
-                                log.verbose (eventX "{socketId} WebSocket <- {messages}"
-                                    >> Message.setFieldValue "socketId" sessionId
-                                    >> Message.setFieldValue "messages" packetMessage)
+                | Some socket ->
+                    log.debug (eventX "{socketId} Error received on session WebSocket, closing: {error}"
+                        >> Message.setFieldValue "socketId" socketId
+                        >> setSocketErrorLogField "error" err)
+                    socket.Close()
+                | None -> ()
+            return coreResult
 
-                                // If we're already in websocket mode we enqueue the received message
-                                socket.AddIncomming(packetMessage)
-                            | _ ->
-                                // Otherwise we only handle a small subset of messages to allow browsers to detect that we
-                                // support websocket correctly and ask for an upgrade
-                                match packetMessage with
-                                | Ping pingData when pingData = TextPacket "probe" ->
-                                    let answer = PacketMessageEncoder.encodeToString (Pong pingData) |> UTF8.bytes |> Segment.ofArray
-                                    do! (webSocket.send Text answer true |> Async.Ignore)
-                                    socket.StartUpgrade(webSocket)
-                                | Upgrade ->
-                                    socket.FinishUpgrade()
-                                | _ -> ()
-                        | (Binary, data, true) ->
-                            log.error (eventX "{socketId} Binary WebSocket data received, this case is not supported yet"
-                                >> Message.setFieldValue "socketId" sessionId)
-                            ()
-                        | (Opcode.Close, _, _) ->
-                            log.debug (eventX "{socketId} WebSocket Close received, closing socket"
-                                >> Message.setFieldValue "socketId" sessionId)
-                            
-                            do! (webSocket.send Opcode.Close Segment.empty true |> Async.Ignore)
-                            socket.Close()
-                            loop <- false
-                        | msg ->
-                            log.warn (eventX "{socketId} Unhandled message received: {msg}"
-                                >> Message.setFieldValue "socketId" sessionId
-                                >> Message.setFieldValue "msg" msg)
-                            ()
-                    | Choice2Of2 err ->
-                        log.debug (eventX "{socketId} Error received on session WebSocket, closing: {error}"
-                            >> Message.setFieldValue "socketId" sessionId
-                            >> setSocketErrorLogField "error" err)
-                        socket.Close()
-                        loop <- false
-            return Choice1Of2 ()
         | None ->
             return! webSocket.send Opcode.Close Segment.empty true
     }
