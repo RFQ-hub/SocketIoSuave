@@ -62,7 +62,6 @@ let main argv =
         let! p = socket.Receive()
         match p with
         | Some packet ->
-            log.info (eventX (sprintf "< %A" packet))
             match packet.EventId with
             | Some id -> socket.Send({ Packet.ofType Ack with EventId = Some id })
             | None -> ()
@@ -71,8 +70,9 @@ let main argv =
                 match cmd with
                 | "new message" ->
                     let textMessage = packet.Data.[1].ToObject<string>()
-                    logVerbose (sprintf "Received %s" textMessage)
-                    socket.Broadcast (chatPacket "new message" { username = defaultArg state.userName ""; message = textMessage })
+                    let userName = defaultArg state.userName "???"
+                    logVerbose (sprintf "[%s] %s" userName textMessage)
+                    socket.Broadcast (chatPacket "new message" { username = userName; message = textMessage })
                     state
                 | "add user" ->
                     match state.userName with
@@ -80,6 +80,7 @@ let main argv =
                     | None ->
                         let userName = packet.Data.[1].ToObject<string>()
                         Interlocked.Increment(&userCount) |> ignore
+                        logVerbose (sprintf "[%A] JOIN" userName)
                         socket.Broadcast (chatPacket "user joined" { UserJoinedEvent.username = userName; numUsers = userCount })
                         socket.Send (chatPacket "login" { UserJoinedEvent.username = userName; numUsers = userCount })
                         { state with userName = Some userName }
@@ -93,23 +94,21 @@ let main argv =
                     logVerbose (sprintf "Unknown command: %s" cmd)
                     state
 
-            logVerbose "Let's loop"
             return! handlePacket newState socket
         | None ->
-            logVerbose "None received, it's the end !"
+            let userName = defaultArg state.userName "???"
+            logVerbose (sprintf "[%A] LEAVE" userName)
             match state.userName with
             | Some userName ->
                 Interlocked.Decrement(&userCount) |> ignore
-                socket.Broadcast { Packet.ofType Event with Data = [ JToken.FromObject("user left"); JToken.FromObject({ UserJoinedEvent.username = userName; numUsers = userCount })] }
+                socket.Broadcast (chatPacket "user left" { UserJoinedEvent.username = userName; numUsers = userCount })
             | None -> ()
             return ()
     }
 
     let app =
         choose [
-            //serveEngineIo { EngineIoConfig.empty with Path = "/socket.io/"; InitialPackets = initialPackets }
             socketio (handlePacket State.empty)
-            // serveSocketIo emptySocketIoConfig
             GET >=> choose [
                 browseHome
             
