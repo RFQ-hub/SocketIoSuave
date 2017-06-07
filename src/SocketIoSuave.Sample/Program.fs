@@ -58,7 +58,7 @@ let main argv =
     let mutable userCount = 0
 
     let rec handlePacket state (socket: ISocketIoSocket) = async {
-        let logVerbose s = log.debug (eventX (sprintf "program {socketId}: %s" s) >> setField "socketId" (id.ToString()))
+        let logVerbose s = log.debug (eventX (sprintf "{socketId} %s" s) >> setField "socketId" (socket.Id))
         let! p = socket.Receive()
         match p with
         | Some packet ->

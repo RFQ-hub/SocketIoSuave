@@ -62,10 +62,7 @@ type private IncomingCommunication =
     | CloseIncomming
 
 type private SocketIoSocket(engineSocket: IEngineIoSocket, handlePackets: ISocketIoSocket -> Async<unit>) as this =
-    let logVerbose s = log.debug (eventX (sprintf "socket {socketId}: %s" s) >> setField "socketId" (engineSocket.Id.ToString()))
-    let logError s = log.error (eventX (sprintf "socket {socketId}: %s" s) >> setField "socketId" (engineSocket.Id.ToString()))
-    let logDebug s = log.debug (eventX (sprintf "socket {socketId}: %s" s) >> setField "socketId" (engineSocket.Id.ToString()))
-    let logWarn s = log.warn (eventX (sprintf "socket {socketId}: %s" s) >> setField "socketId" (engineSocket.Id.ToString()))
+    let setSocketIdField = setField "socketId" (engineSocket.Id)
 
     let closeLock = new obj()
     let mutable closed = false
@@ -77,7 +74,7 @@ type private SocketIoSocket(engineSocket: IEngineIoSocket, handlePackets: ISocke
 
             match msg with
             | NewIncomming msg ->
-                logVerbose (sprintf "NewIncomming %A" msg)
+                log.verbose (eventX "{socketId} NewIncomming {msg}" >> Message.setFieldValue "msg" msg >> setSocketIdField)
                 match currentReplyChan with
                 | Some(chan) ->
                     chan.Reply(Some msg)
@@ -94,7 +91,7 @@ type private SocketIoSocket(engineSocket: IEngineIoSocket, handlePackets: ISocke
                     return! loop messages None
                 | _, Some(_) -> failwith "Don't cross the beams !"
             | CloseIncomming ->
-                logVerbose "CloseIncomming"
+                log.verbose (eventX "{socketId} CloseIncomming" >> setSocketIdField)
                 match currentReplyChan with
                 | Some(chan) -> chan.Reply(None)
                 | None -> ()
@@ -114,10 +111,10 @@ type private SocketIoSocket(engineSocket: IEngineIoSocket, handlePackets: ISocke
             match newPacket with
             | Some newPacket -> incomming.Post(NewIncomming newPacket)
             | None -> ()
-            logVerbose "Looping !"
             return! handle newState
         | None ->
-            logVerbose "Read returned None, finishing"
+            log.verbose (eventX "{socketId} Read returned None, finishing" >> setSocketIdField)
+            this.Close()
             return ()
     }
 
@@ -138,8 +135,7 @@ type private SocketIoSocket(engineSocket: IEngineIoSocket, handlePackets: ISocke
                 |> Async.map Option.flattern)
 
     let onMailBoxError (x: Exception) =
-        logError (sprintf "Exception, will close: %O" (x.ToString()))
-        logError (x.ToString())
+        log.error (eventX "{socketId} Exception {exception}" >> Message.setFieldValue "exception" x >> setSocketIdField)
         this.Close()
 
     do
@@ -151,7 +147,7 @@ type private SocketIoSocket(engineSocket: IEngineIoSocket, handlePackets: ISocke
         
         // When the handler finishes, close the socket
         task.ContinueWith(fun _ -> 
-            logDebug "Handler finished, will close"
+            log.verbose (eventX "{socketId} Handler finished, will close" >> setSocketIdField)
             this.Close()) |> ignore
 
         // Start our packet decoding loop

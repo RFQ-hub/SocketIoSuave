@@ -99,7 +99,7 @@ type private SocketEngineCommunication =
     }
 
 type private EngineIoSocket(id: SocketId, pingTimeout: TimeSpan, comms: SocketEngineCommunication, handleSocket: IEngineIoSocket -> Async<unit>) as this =
-    let logVerbose s = log.debug (eventX (sprintf "{socketId} %s" s) >> setField "socketId" (id.ToString()))
+    let logVerbose s = log.verbose (eventX (sprintf "{socketId} %s" s) >> setField "socketId" (id.ToString()))
     let logError s = log.error (eventX (sprintf "{socketId} %s" s) >> setField "socketId" (id.ToString()))
     let logDebug s = log.debug (eventX (sprintf "{socketId} %s" s) >> setField "socketId" (id.ToString()))
     let logWarn s = log.warn (eventX (sprintf "{socketId} %s" s) >> setField "socketId" (id.ToString()))
@@ -276,7 +276,7 @@ type private EngineIoSocket(id: SocketId, pingTimeout: TimeSpan, comms: SocketEn
         
         // When the handler finishes, close the socket
         task.ContinueWith(fun _ ->
-            logDebug "Handler finished, will close"
+            logVerbose "Handler finished, will close"
             this.Close()) |> ignore
 
     member __.ReadIncomming() =
@@ -302,14 +302,14 @@ type private EngineIoSocket(id: SocketId, pingTimeout: TimeSpan, comms: SocketEn
     member __.Close() =
         lock closeLock (fun _ ->
             if not closed then
-                logDebug "Closing"
+                logVerbose "Closing"
                 closed <- true
                 comms.socketClosing id
                 pingTimeoutTimer.Stop()
                 pingTimeoutTimer.Dispose()
                 incomming.Post CloseIncomming
                 outgoing.Post CloseOutgoing
-                logDebug "Closed")
+                logVerbose "Closed")
     
     member __.Send(messages) = this.AddOutgoing(messages |> List.map Message)
     member __.Send(messages) = this.AddOutgoing(messages |> Seq.map Message |> List.ofSeq)
@@ -418,9 +418,9 @@ type EngineIo(config, app: EngineApp) as this =
             | Some(socket) -> asyncTrial {
                 let! payload = socket.ReadOutgoing ()
                 let payload' = defaultArg payload (Payload([]))
-                log.verbose (eventX "{socketId} Http GET <- {messages}"
+                log.verbose (eventX "{socketId} Http GET <- {message}"
                     >> Message.setFieldValue "socketId" sessionId
-                    >> Message.setFieldValue "messages"(Payload.getMessages payload'))
+                    >> Message.setFieldValue "message"(Payload.getMessages payload'))
 
                 return socketId, payload'
                 }
@@ -452,7 +452,9 @@ type EngineIo(config, app: EngineApp) as this =
                 else
                     req.rawForm |> Text.Encoding.UTF8.GetString |> PayloadDecoder.decodeFromString
             for message in payload |> Payload.getMessages do
-                log.debug (eventX (sprintf "%s -> %A" (socket.Id.ToString()) message))
+                log.verbose (eventX "{socketId} Http POST -> {message}"
+                    >> Message.setFieldValue "socketId" socket.Id
+                    >> Message.setFieldValue "message" message)
                 socket.AddIncomming message
             ok socket.Id
         | None ->
@@ -483,7 +485,7 @@ type EngineIo(config, app: EngineApp) as this =
                     let packetMessage = PacketMessageDecoder.decodeFromString str
                     match socket.Transport with
                     | Websocket ->
-                        log.verbose (eventX "{socketId} WebSocket <- {messages}"
+                        log.verbose (eventX "{socketId} WebSocket -> {messages}"
                             >> Message.setFieldValue "socketId" sessionId
                             >> Message.setFieldValue "messages" packetMessage)
 
@@ -505,7 +507,7 @@ type EngineIo(config, app: EngineApp) as this =
                         >> Message.setFieldValue "socketId" sessionId)
                     ()
                 | (Opcode.Close, _, _) ->
-                    log.debug (eventX "{socketId} WebSocket Close received, closing socket"
+                    log.verbose (eventX "{socketId} WebSocket Close received, closing socket"
                         >> Message.setFieldValue "socketId" sessionId)
                             
                     do! webSocket.send Opcode.Close Segment.empty true
@@ -528,7 +530,7 @@ type EngineIo(config, app: EngineApp) as this =
             | Choice2Of2 err ->
                 match tryGetSocket engineCtx with
                 | Some socket ->
-                    log.debug (eventX "{socketId} Error received on session WebSocket, closing: {error}"
+                    log.verbose (eventX "{socketId} Error received on session WebSocket, closing: {error}"
                         >> Message.setFieldValue "socketId" socketId
                         >> setSocketErrorLogField "error" err)
                     socket.Close()
