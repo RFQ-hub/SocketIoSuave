@@ -3,7 +3,7 @@ module internal Segment
 
 open System
 
-let ofArray (arr: 't[]) = new ArraySegment<'t>(arr)
+let ofArray<'t> (arr: 't[]) = new ArraySegment<'t>(arr)
 
 let empty<'a> = Array.empty<'a> |> ofArray
 
@@ -15,9 +15,9 @@ let subset offset count (segment: ArraySegment<'t>) =
 
     new ArraySegment<'t>(segment.Array, segment.Offset + offset, count)
 
-let take count segment = subset 0 count segment
+let inline take count segment = subset 0 count segment
 
-let skip count (segment: ArraySegment<'t>) = subset count (segment.Count - count) segment
+let inline skip count (segment: ArraySegment<'t>) = subset count (segment.Count - count) segment
 
 let totalSize (segments: ArraySegment<'t> seq) =
     segments |> Seq.sumBy (fun s -> s.Count)

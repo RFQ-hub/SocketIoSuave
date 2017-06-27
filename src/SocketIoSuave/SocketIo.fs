@@ -15,27 +15,32 @@ open SocketIoSuave.EngineIo
 open SocketIoSuave.EngineIo.Engine
 open System.Collections.Generic
 open System.Threading.Tasks
+open Newtonsoft.Json.Linq
+
+let private initialPacket = { Packet.Type = PacketType.Connect; Namespace = "/"; EventId = None; Data = [] }
+
+let private initialPacketMessages =
+    initialPacket
+    |> PacketEncoder.encode
+    |> List.map Message
 
 type SocketIoConfig =
     {
         EngineConfig: EngineIoConfig
+        JsonSerializer: Newtonsoft.Json.JsonSerializer
     }
-
-let initialPackets =
-    { Packet.Type = PacketType.Connect; Namespace = "/"; EventId = None; Data = [] }
-    |> PacketEncoder.encode
-    |> List.map Message
-
-let emptySocketIoConfig =
-    {
-        EngineConfig =
-            { EngineIoConfig.empty with
-                Path = "/socket.io/"
-                InitialPackets = initialPackets
-                PingInterval = TimeSpan.FromSeconds(3.)
-                PingTimeout = TimeSpan.FromSeconds(10.)
+    with
+        static member empty =
+            {
+                EngineConfig =
+                    { EngineIoConfig.empty with
+                        Path = "/socket.io/"
+                        InitialPackets = initialPacketMessages
+                        PingInterval = TimeSpan.FromSeconds(3.)
+                        PingTimeout = TimeSpan.FromSeconds(10.)
+                    }
+                JsonSerializer = Newtonsoft.Json.JsonSerializer() 
             }
-    }
 
 let private log = Log.create "SocketIoSuave.SocketIo"
 
@@ -48,10 +53,16 @@ type ISocketIoSocket =
     abstract member Receive: unit -> Async<Packet option>
     
     /// Send a packet to the current socket
-    abstract member Send: Packet -> unit
+    abstract member SendPacket: Packet -> unit
+
+    /// Send an event to the current socket
+    abstract member Send: string * list<'a> -> unit
     
     /// Send a packet to all other connected sockets
-    abstract member Broadcast: Packet -> unit
+    abstract member BroadcastPacket: Packet -> unit
+
+    /// Send an event to all other connected sockets
+    abstract member Broadcast: string * list<'a> -> unit
     
     /// Request to close the socket
     abstract member Close: unit -> unit
@@ -61,7 +72,16 @@ type private IncomingCommunication =
     | ReadIncomming of AsyncReplyChannel<Packet option>
     | CloseIncomming
 
-type private SocketIoSocket(engineSocket: IEngineIoSocket, handlePackets: ISocketIoSocket -> Async<unit>) as this =
+/// Create an event packet with name string + args format
+let private mkEvent (eventName: string) args serializer =
+    let jsonEventName = JToken.FromObject(eventName, serializer)
+    let jsonArgs = args |> List.map (fun data -> JToken.FromObject(box data, serializer))
+    {
+        Packet.ofType PacketType.Event with
+            Data = jsonEventName :: jsonArgs
+    }
+
+type private SocketIoSocket(config : SocketIoConfig, engineSocket: IEngineIoSocket, handlePackets: ISocketIoSocket -> Async<unit>) as this =
     let setSocketIdField = setField "socketId" (engineSocket.Id)
 
     let closeLock = new obj()
@@ -163,28 +183,23 @@ type private SocketIoSocket(engineSocket: IEngineIoSocket, handlePackets: ISocke
     interface ISocketIoSocket with
         member __.Id with get () = engineSocket.Id
         member __.Receive() = read ()
-        member __.Send(packet) = send packet
-        member __.Broadcast(packet) = broadcast packet
+        member __.Send(eventName, args) = send (mkEvent eventName args config.JsonSerializer)
+        member __.SendPacket(packet) = send packet
+        member __.BroadcastPacket(packet) = broadcast packet
+        member __.Broadcast(eventName, args) = broadcast (mkEvent eventName args config.JsonSerializer)
         member __.Close() = this.Close()
 
-type SocketIo(handlePackets: ISocketIoSocket -> Async<unit>) =
-    let initPacket = { Packet.Type = PacketType.Connect; Namespace = "/"; EventId = None; Data = [] }
-    let engineConfig =
-        { EngineIoConfig.empty with
-            Path = "/socket.io/"
-            InitialPackets = initPacket |> PacketEncoder.encode |> List.map Message
-        }
-
+type SocketIo(config: SocketIoConfig, handlePackets: ISocketIoSocket -> Async<unit>) =
     let handleSocket (engineSocket: IEngineIoSocket) =
-        let socket = new SocketIoSocket(engineSocket, handlePackets)
+        let socket = new SocketIoSocket(config, engineSocket, handlePackets)
         socket.Handle()
 
-    let engine = new EngineIo(engineConfig, { handleSocket = handleSocket } )
+    let engine = new EngineIo(config.EngineConfig, handleSocket)
 
     let handle: WebPart =
         choose [
-            EmbededFiles.handleInPath engineConfig.Path
-            suaveEngineIo engine engineConfig
+            EmbededFiles.handleInPath config.EngineConfig.Path
+            suaveEngineIo engine config.EngineConfig
         ]
 
     /// Version of the socket.io protocol

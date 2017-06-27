@@ -331,11 +331,6 @@ type private EngineIoSocket(id: SocketId, pingTimeout: TimeSpan, comms: SocketEn
 let inline private badAsync err = Async.result (Bad [err]) |> AR
 let inline private okAsync ok = Async.result (Ok(ok,[])) |> AR
 
-type EngineApp = 
-    {
-        handleSocket: IEngineIoSocket -> Async<unit>
-    }
-
 type private RequestContext =
     {
         Transport: Transport option
@@ -364,7 +359,7 @@ let private mutateField<'t when 't: not struct> (targetField: 't byref) (mutatio
         let afterExchange = System.Threading.Interlocked.CompareExchange(&targetField, newValue, before)
         retry <- not (obj.ReferenceEquals(before, afterExchange))
 
-type EngineIo(config, app: EngineApp) as this =
+type EngineIo(config, handleSocket: IEngineIoSocket -> Async<unit>) as this =
     let mutable sessions: Map<SocketId, EngineIoSocket> = Map.empty
     let idGenerator = Base64Id.create config.RandomNumberGenerator
     
@@ -403,7 +398,7 @@ type EngineIo(config, app: EngineApp) as this =
             let socketIdString = idGenerator ()
             let socketId = SocketId socketIdString
 
-            let socket = new EngineIoSocket(socketId, socketTimeout, socketCommunications, app.handleSocket)
+            let socket = new EngineIoSocket(socketId, socketTimeout, socketCommunications, handleSocket)
             mutateField &sessions (fun s -> s |> Map.add socket.Id socket)
             socket.Start()
             

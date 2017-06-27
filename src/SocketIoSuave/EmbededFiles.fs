@@ -32,9 +32,14 @@ let private sendResource res: WebPart = fun ctx ->
         ctx with response = { ctx.response with content = Bytes res.bytes.Value; status = HTTP_200.status }
     } |> Some |> Async.result
 
+/// Serve the embeded socket.io js client in the specified basePath
 let handleInPath (basePath: string) =
     let basePath = if basePath.EndsWith("/") then basePath else basePath + "/"
-    choose (resources |> List.map(fun res ->
-        Filters.path (basePath + res.fileName)
-        >=> Writers.setMimeType res.mimeType
-        >=> sendResource res))
+    let resourceParts =
+        resources
+        |> List.map(fun res ->
+            Filters.path (basePath + res.fileName)
+            >=> Writers.setMimeType res.mimeType
+            >=> sendResource res)
+
+    choose resourceParts

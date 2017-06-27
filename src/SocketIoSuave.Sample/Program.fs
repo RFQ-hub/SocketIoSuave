@@ -45,15 +45,9 @@ type State = {
 with
     static member empty = { State.userName = None }
 
-let chatPacket<'t> (cmd: string) (data: 't) =
-    {
-        Packet.ofType Event with
-            Data = [ JToken.FromObject(cmd); JToken.FromObject(box data) ]
-    }
-
 [<EntryPoint>]
 let main argv = 
-    let socketio handlePackets = SocketIo(handlePackets).WebPart
+    let socketio handlePackets = SocketIo(SocketIoConfig.empty, handlePackets).WebPart
 
     let mutable userCount = 0
 
@@ -63,7 +57,7 @@ let main argv =
         match p with
         | Some packet ->
             match packet.EventId with
-            | Some id -> socket.Send({ Packet.ofType Ack with EventId = Some id })
+            | Some id -> socket.SendPacket({ Packet.ofType Ack with EventId = Some id })
             | None -> ()
             let cmd = packet.Data.[0].ToObject<string>()
             let newState =
@@ -72,7 +66,7 @@ let main argv =
                     let textMessage = packet.Data.[1].ToObject<string>()
                     let userName = defaultArg state.userName "???"
                     logVerbose (sprintf "[%s] %s" userName textMessage)
-                    socket.Broadcast (chatPacket "new message" { username = userName; message = textMessage })
+                    socket.Broadcast ("new message", [{ username = userName; message = textMessage }])
                     state
                 | "add user" ->
                     match state.userName with
@@ -81,14 +75,14 @@ let main argv =
                         let userName = packet.Data.[1].ToObject<string>()
                         Interlocked.Increment(&userCount) |> ignore
                         logVerbose (sprintf "[%A] JOIN" userName)
-                        socket.Broadcast (chatPacket "user joined" { UserJoinedEvent.username = userName; numUsers = userCount })
-                        socket.Send (chatPacket "login" { UserJoinedEvent.username = userName; numUsers = userCount })
+                        socket.Broadcast ("user joined", [{ UserJoinedEvent.username = userName; numUsers = userCount }])
+                        socket.Send ("login", [{ UserJoinedEvent.username = userName; numUsers = userCount }])
                         { state with userName = Some userName }
                 | "typing" ->
-                    socket.Broadcast (chatPacket "typing" { TypingEvent.username = defaultArg state.userName "???" })
+                    socket.Broadcast ("typing", [{ TypingEvent.username = defaultArg state.userName "???" }])
                     state
                 | "stop typing" ->
-                    socket.Broadcast (chatPacket "stop typing" { TypingEvent.username = defaultArg state.userName "???" })
+                    socket.Broadcast ("stop typing", [{ TypingEvent.username = defaultArg state.userName "???" }])
                     state
                 | other ->
                     logVerbose (sprintf "Unknown command: %s" cmd)
@@ -101,7 +95,7 @@ let main argv =
             match state.userName with
             | Some userName ->
                 Interlocked.Decrement(&userCount) |> ignore
-                socket.Broadcast (chatPacket "user left" { UserJoinedEvent.username = userName; numUsers = userCount })
+                socket.Broadcast ("user left", [{ UserJoinedEvent.username = userName; numUsers = userCount }])
             | None -> ()
             return ()
     }
