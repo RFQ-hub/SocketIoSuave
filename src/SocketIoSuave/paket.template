@@ -1,5 +1,5 @@
 type project
-id Itg.Ssf.SocketIoSuave
+id Itg.SocketIoSuave
 owners ITG
 authors ITG
 projectUrl
