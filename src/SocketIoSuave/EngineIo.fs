@@ -99,11 +99,11 @@ type private SocketEngineCommunication =
     }
 
 type private EngineIoSocket(id: SocketId, pingTimeout: TimeSpan, comms: SocketEngineCommunication, handleSocket: IEngineIoSocket -> Async<unit>) as this =
-    let socketIdForLog = setField "socketId" (id.ToString())
-    let logVerbose s = log.verbose (eventX (sprintf "{socketId} %s" s) >> socketIdForLog)
-    let logError s = log.error (eventX (sprintf "{socketId} %s" s) >> socketIdForLog)
-    let logDebug s = log.debug (eventX (sprintf "{socketId} %s" s) >> socketIdForLog)
-    let logWarn s = log.warn (eventX (sprintf "{socketId} %s" s) >> socketIdForLog)
+    let setSocketIdField = setField "socketId" (id.ToString())
+    let logVerbose s = log.verbose (eventX (sprintf "{socketId} %s" s) >> setSocketIdField)
+    let logError s = log.error (eventX (sprintf "{socketId} %s" s) >> setSocketIdField)
+    let logDebug s = log.debug (eventX (sprintf "{socketId} %s" s) >> setSocketIdField)
+    let logWarn s = log.warn (eventX (sprintf "{socketId} %s" s) >> setSocketIdField)
     
     let closeLock = new obj()
     let mutable closed = false
@@ -249,7 +249,6 @@ type private EngineIoSocket(id: SocketId, pingTimeout: TimeSpan, comms: SocketEn
                 match websocket with
                 | Some(websocket) ->
                     do! sendOnWebSocket websocket Close
-                    // TODO: Really close the websocket
                 | None -> ()
                 return ()
         }
@@ -260,6 +259,18 @@ type private EngineIoSocket(id: SocketId, pingTimeout: TimeSpan, comms: SocketEn
     let onMailBoxError (x: Exception) =
         logError (sprintf "Exception, will close: %O" (x.ToString()))
         this.Close()
+
+    let readIncommingCore () =
+        if closed then
+            Async.result None
+        else
+            incomming.PostAndAsyncReply(ReadIncomming)
+
+    let readOutgoingCore () =
+        if closed then
+            Async.result None
+        else
+            outgoing.PostAndTryAsyncReply(ReadOutgoing, timeoutInMs)
 
     do
         incomming.Error.Add(onMailBoxError)
@@ -275,27 +286,16 @@ type private EngineIoSocket(id: SocketId, pingTimeout: TimeSpan, comms: SocketEn
         
         // When the handler finishes, close the socket
         task.ContinueWith(fun task ->
-            let messageFactory = (
-                eventX (sprintf "{socketId} Engine handler finished with status {status}, will close. Error: {error}" )
-                >> socketIdForLog
+            let messageFactory = 
+                eventX "{socketId} Engine handler finished with status {status}, will close. Error: {error}" 
+                >> setSocketIdField
                 >> setField "status" task.Status
-                >> setField "error" task.Exception)
+                >> setField "error" task.Exception
             (if isNull task.Exception then log.verbose else log.error) messageFactory
             this.Close()) |> ignore
 
-    member __.ReadIncomming() =
-        lock closeLock (fun _ ->
-            if closed then
-                Async.result None
-            else
-                incomming.PostAndAsyncReply(ReadIncomming))
-
-    member __.ReadOutgoing() =
-        lock closeLock (fun _ ->
-            if closed then
-                Async.result None
-            else
-                outgoing.PostAndTryAsyncReply(ReadOutgoing, timeoutInMs))
+    member __.ReadIncomming() = lock closeLock readIncommingCore
+    member __.ReadOutgoing() = lock closeLock readOutgoingCore
 
     member __.AddOutgoing(messages) =
         outgoing.Post (NewOutgoing messages)

@@ -165,13 +165,30 @@ type private SocketIoSocket(config : SocketIoConfig, engineSocket: IEngineIoSock
         // Start the async handler for this socket on the threadpool
         task <- handlePackets (this) |> Async.StartAsTask
         
-        // When the handler finishes, close the socket
-        task.ContinueWith(fun _ -> 
-            log.verbose (eventX "{socketId} Socket handler finished, will close" >> setSocketIdField)
+        // When the (user provided) handler finishes, close the socket
+        task.ContinueWith(fun _ ->
+            let messageFactory = 
+                eventX "{socketId} Socket handler finished with status {status}, will close. Error: {error}"
+                >> setSocketIdField
+                >> setField "status" task.Status
+                >> setField "error" task.Exception
+            (if isNull task.Exception then log.verbose else log.error) messageFactory
             this.Close()) |> ignore
 
         // Start our packet decoding loop
-        handle Protocol.PacketDecoder.empty
+        async {
+            try
+                do! handle Protocol.PacketDecoder.empty
+            with
+            | :? Exception as ex ->
+                // If the engine has thrown for any reason we need to cleanup
+                log.error (
+                    eventX "{socketId} engine loop throw has trown, closing. Error: {error}"
+                    >> setSocketIdField
+                    >> setField "error" ex)
+                this.Close()
+        }
+        
 
     member __.Close() =
         lock closeLock (fun _ ->
