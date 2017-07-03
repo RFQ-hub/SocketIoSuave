@@ -570,16 +570,6 @@ type EngineIo(config, handleSocket: IEngineIoSocket -> Async<unit>) as this =
             if Some socketId <> exceptSocket then
                 socket.Send(message))
 
-// Fixed in next Suave version, https://github.com/SuaveIO/suave/pull/575
-let private removeBuggyCorsHeader: WebPart =
-    fun ctx -> async {
-        let finalHeaders =
-            ctx.response.headers
-            |> List.filter (fun (k,v) -> k <> "Access-Control-Allow-Credentials" || v = "True")
-            |> List.map(fun (k,v) -> if k = "Access-Control-Allow-Credentials" then k,v.ToLower() else k,v)
-        return Some({ ctx with response = { ctx.response with headers = finalHeaders } })
-    }
-
 // Adapted from https://github.com/socketio/socket.io/pull/1333
 let private disableXSSProtectionForIE: WebPart =
     warbler (fun ctx ->
@@ -591,11 +581,6 @@ let private disableXSSProtectionForIE: WebPart =
     )
 
 let suaveEngineIo (engine: EngineIo) config: WebPart =
-    let corsConfig =
-        { defaultCORSConfig with
-            allowedMethods = InclusiveOption.None
-            allowedUris = InclusiveOption.All
-            allowCookies = true }
     choose [
         Filters.pathStarts config.Path
             >=>
@@ -603,7 +588,5 @@ let suaveEngineIo (engine: EngineIo) config: WebPart =
                 engine.WebPart
                 RequestErrors.BAD_REQUEST "O_o"
             ]
-            >=> cors corsConfig
-            >=> removeBuggyCorsHeader
             >=> disableXSSProtectionForIE
     ]
