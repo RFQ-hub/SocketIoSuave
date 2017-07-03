@@ -167,7 +167,7 @@ type private SocketIoSocket(config : SocketIoConfig, engineSocket: IEngineIoSock
         
         // When the handler finishes, close the socket
         task.ContinueWith(fun _ -> 
-            log.verbose (eventX "{socketId} Handler finished, will close" >> setSocketIdField)
+            log.verbose (eventX "{socketId} Socket handler finished, will close" >> setSocketIdField)
             this.Close()) |> ignore
 
         // Start our packet decoding loop

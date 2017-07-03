@@ -99,10 +99,11 @@ type private SocketEngineCommunication =
     }
 
 type private EngineIoSocket(id: SocketId, pingTimeout: TimeSpan, comms: SocketEngineCommunication, handleSocket: IEngineIoSocket -> Async<unit>) as this =
-    let logVerbose s = log.verbose (eventX (sprintf "{socketId} %s" s) >> setField "socketId" (id.ToString()))
-    let logError s = log.error (eventX (sprintf "{socketId} %s" s) >> setField "socketId" (id.ToString()))
-    let logDebug s = log.debug (eventX (sprintf "{socketId} %s" s) >> setField "socketId" (id.ToString()))
-    let logWarn s = log.warn (eventX (sprintf "{socketId} %s" s) >> setField "socketId" (id.ToString()))
+    let socketIdForLog = setField "socketId" (id.ToString())
+    let logVerbose s = log.verbose (eventX (sprintf "{socketId} %s" s) >> socketIdForLog)
+    let logError s = log.error (eventX (sprintf "{socketId} %s" s) >> socketIdForLog)
+    let logDebug s = log.debug (eventX (sprintf "{socketId} %s" s) >> socketIdForLog)
+    let logWarn s = log.warn (eventX (sprintf "{socketId} %s" s) >> socketIdForLog)
     
     let closeLock = new obj()
     let mutable closed = false
@@ -261,9 +262,7 @@ type private EngineIoSocket(id: SocketId, pingTimeout: TimeSpan, comms: SocketEn
         this.Close()
 
     do
-        incomming.DefaultTimeout <- timeoutInMs * 2
         incomming.Error.Add(onMailBoxError)
-        outgoing.DefaultTimeout <- timeoutInMs * 2
         outgoing.Error.Add(onMailBoxError)
 
     member val Id = id
@@ -275,8 +274,13 @@ type private EngineIoSocket(id: SocketId, pingTimeout: TimeSpan, comms: SocketEn
         task <- handleSocket (this) |> Async.StartAsTask
         
         // When the handler finishes, close the socket
-        task.ContinueWith(fun _ ->
-            logVerbose "Handler finished, will close"
+        task.ContinueWith(fun task ->
+            let messageFactory = (
+                eventX (sprintf "{socketId} Engine handler finished with status {status}, will close. Error: {error}" )
+                >> socketIdForLog
+                >> setField "status" task.Status
+                >> setField "error" task.Exception)
+            (if isNull task.Exception then log.verbose else log.error) messageFactory
             this.Close()) |> ignore
 
     member __.ReadIncomming() =
