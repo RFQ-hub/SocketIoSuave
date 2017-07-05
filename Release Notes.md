@@ -1,3 +1,7 @@
+### New in 0.3
+
+* Add the `HttpContext` that started the socket.io call in the handler
+
 ### New in 0.2
 
 * Remove CORS Specific headers

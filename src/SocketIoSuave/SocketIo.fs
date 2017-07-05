@@ -16,6 +16,7 @@ open SocketIoSuave.EngineIo.Engine
 open System.Collections.Generic
 open System.Threading.Tasks
 open Newtonsoft.Json.Linq
+open Newtonsoft.Json
 
 let private initialPacket = { Packet.Type = PacketType.Connect; Namespace = "/"; EventId = None; Data = [] }
 
@@ -39,7 +40,7 @@ type SocketIoConfig =
                         PingInterval = TimeSpan.FromSeconds(3.)
                         PingTimeout = TimeSpan.FromSeconds(10.)
                     }
-                JsonSerializer = Newtonsoft.Json.JsonSerializer() 
+                JsonSerializer = Newtonsoft.Json.JsonSerializer(NullValueHandling = NullValueHandling.Include, MissingMemberHandling = MissingMemberHandling.Error) 
             }
 
 let private log = Log.create "SocketIoSuave.SocketIo"
@@ -81,7 +82,9 @@ let private mkEvent (eventName: string) args serializer =
             Data = jsonEventName :: jsonArgs
     }
 
-type private SocketIoSocket(config : SocketIoConfig, engineSocket: IEngineIoSocket, handlePackets: ISocketIoSocket -> Async<unit>) as this =
+type SocketHandler = ISocketIoSocket -> HttpContext -> Async<unit>
+
+type private SocketIoSocket(config : SocketIoConfig, engineSocket: IEngineIoSocket, handlePackets: SocketHandler) as this =
     let setSocketIdField = setField "socketId" (engineSocket.Id)
 
     let closeLock = new obj()
@@ -161,9 +164,9 @@ type private SocketIoSocket(config : SocketIoConfig, engineSocket: IEngineIoSock
     do
         incomming.Error.Add(onMailBoxError)
 
-    member __.Handle() =
+    member __.Handle(httpContext: HttpContext) =
         // Start the async handler for this socket on the threadpool
-        task <- handlePackets (this) |> Async.StartAsTask
+        task <- handlePackets this httpContext |> Async.StartAsTask
         
         // When the (user provided) handler finishes, close the socket
         task.ContinueWith(fun _ ->
@@ -188,7 +191,6 @@ type private SocketIoSocket(config : SocketIoConfig, engineSocket: IEngineIoSock
                     >> setField "error" ex)
                 this.Close()
         }
-        
 
     member __.Close() =
         lock closeLock (fun _ ->
@@ -206,10 +208,10 @@ type private SocketIoSocket(config : SocketIoConfig, engineSocket: IEngineIoSock
         member __.Broadcast(eventName, args) = broadcast (mkEvent eventName args config.JsonSerializer)
         member __.Close() = this.Close()
 
-type SocketIo(config: SocketIoConfig, handlePackets: ISocketIoSocket -> Async<unit>) =
-    let handleSocket (engineSocket: IEngineIoSocket) =
+type SocketIo(config: SocketIoConfig, handlePackets: SocketHandler) =
+    let handleSocket (engineSocket: IEngineIoSocket) httpContext =
         let socket = new SocketIoSocket(config, engineSocket, handlePackets)
-        socket.Handle()
+        socket.Handle(httpContext)
 
     let engine = new EngineIo(config.EngineConfig, handleSocket)
 

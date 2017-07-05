@@ -98,7 +98,10 @@ type private SocketEngineCommunication =
         broadcast: (SocketId option) *  (PacketContent seq) -> unit
     }
 
-type private EngineIoSocket(id: SocketId, pingTimeout: TimeSpan, comms: SocketEngineCommunication, handleSocket: IEngineIoSocket -> Async<unit>) as this =
+/// A function that handle a single engine.io socket
+type EngineHandler = IEngineIoSocket -> HttpContext-> Async<unit>
+
+type private EngineIoSocket(id: SocketId, pingTimeout: TimeSpan, comms: SocketEngineCommunication, handleSocket: EngineHandler) as this =
     let setSocketIdField = setField "socketId" (id.ToString())
     let logVerbose s = log.verbose (eventX (sprintf "{socketId} %s" s) >> setSocketIdField)
     let logError s = log.error (eventX (sprintf "{socketId} %s" s) >> setSocketIdField)
@@ -278,11 +281,11 @@ type private EngineIoSocket(id: SocketId, pingTimeout: TimeSpan, comms: SocketEn
 
     member val Id = id
     member __.Transport with get() = transport
-    member __.Start() =
+    member __.Start(startContext: HttpContext) =
         setPingTimeout ()
         
         // Start the async handler for this socket on the threadpool
-        task <- handleSocket (this) |> Async.StartAsTask
+        task <- handleSocket this startContext |> Async.StartAsTask
         
         // When the handler finishes, close the socket
         task.ContinueWith(fun task ->
@@ -363,7 +366,7 @@ let private mutateField<'t when 't: not struct> (targetField: 't byref) (mutatio
         let afterExchange = System.Threading.Interlocked.CompareExchange(&targetField, newValue, before)
         retry <- not (obj.ReferenceEquals(before, afterExchange))
 
-type EngineIo(config, handleSocket: IEngineIoSocket -> Async<unit>) as this =
+type EngineIo(config, handleSocket: EngineHandler) as this =
     let mutable sessions: Map<SocketId, EngineIoSocket> = Map.empty
     let idGenerator = Base64Id.create config.RandomNumberGenerator
     
@@ -396,7 +399,7 @@ type EngineIo(config, handleSocket: IEngineIoSocket -> Async<unit>) as this =
             |> setUniqueHeader "Content-Type" "text/plain; charset=UTF-8"
             |> setContentBytes (payload |> PayloadEncoder.encodeToString |> System.Text.Encoding.UTF8.GetBytes)
 
-    let handleGet' engineCtx: AsyncResult<SocketId*Payload, Error> =
+    let handleGet' engineCtx httpContext: AsyncResult<SocketId*Payload, Error> =
         match engineCtx.SocketId with
         | None ->
             let socketIdString = idGenerator ()
@@ -404,7 +407,7 @@ type EngineIo(config, handleSocket: IEngineIoSocket -> Async<unit>) as this =
 
             let socket = new EngineIoSocket(socketId, socketTimeout, socketCommunications, handleSocket)
             mutateField &sessions (fun s -> s |> Map.add socket.Id socket)
-            socket.Start()
+            socket.Start(httpContext)
             
             log.info (eventX "{socketId} Connected, creating session" >> Message.setFieldValue "socketId" socketId)
 
@@ -435,9 +438,9 @@ type EngineIo(config, handleSocket: IEngineIoSocket -> Async<unit>) as this =
             | Unknown -> simpleResponse HttpCode.HTTP_500 "Unknown error"
             | UnknownSessionId -> simpleResponse HttpCode.HTTP_404 "Unknown session ID"
 
-    let handleGet engineCtx =
+    let handleGet engineCtx httpContext =
         asyncTrial {
-            let! x = handleGet' engineCtx
+            let! x = handleGet' engineCtx httpContext
             let (socketId, payload) = x
             return payloadToResponse socketId payload engineCtx
         }
@@ -548,7 +551,7 @@ type EngineIo(config, handleSocket: IEngineIoSocket -> Async<unit>) as this =
         | GET, Some(Polling) ->
             let engineCtx = getContext ctx.request
             async {
-                let! result = handleGet engineCtx |> Async.ofAsyncResult
+                let! result = handleGet engineCtx ctx |> Async.ofAsyncResult
                 return returnResponse ctx (resultToHttp result)
             }
         | GET, Some(Websocket) ->

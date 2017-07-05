@@ -19,7 +19,7 @@ open System.Threading
 open Newtonsoft.Json
 open Newtonsoft.Json.Linq
 
-let private log = Targets.create Debug [| "SocketIoSuave" |]
+let private log = Targets.create Verbose [| "SocketIoSuave" |]
 
 type NewMessageEvent = {
     username: string
@@ -51,7 +51,7 @@ let main argv =
 
     let mutable userCount = 0
 
-    let rec handlePacket state (socket: ISocketIoSocket) = async {
+    let rec handlePacket state (socket: ISocketIoSocket) httpContext = async {
         let logVerbose s = log.debug (eventX (sprintf "{socketId} %s" s) >> setField "socketId" (socket.Id))
         let! p = socket.Receive()
         match p with
@@ -88,7 +88,7 @@ let main argv =
                     logVerbose (sprintf "Unknown command: %s" cmd)
                     state
 
-            return! handlePacket newState socket
+            return! handlePacket newState socket httpContext
         | None ->
             let userName = defaultArg state.userName "???"
             logVerbose (sprintf "[%A] LEAVE" userName)
