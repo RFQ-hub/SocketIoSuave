@@ -186,7 +186,7 @@ task "NuGet" ["FinalBinaries"] {
     |> AppVeyor.PushArtifacts
 }
 
-task "PublishNuget" ["Clean", "NuGet"] {
+task "PublishNuget" ["Clean"; "NuGet"] {
     let key =
         match environVarOrNone "nuget-key" with
         | Some(key) -> key
