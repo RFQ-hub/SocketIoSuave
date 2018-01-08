@@ -103,7 +103,7 @@ type JsonGenerators =
     static member JArray() = Arb.fromGen (genJArray genSimpleJValues)
     static member JObject() = Arb.fromGen (genJObject genSimpleJValues)
 
-let config = { FsCheck.Config.Verbose with Arbitrary = [typeof<PacketGenerator>; typeof<JsonGenerators>] }
+let config = { FsCheckConfig.defaultConfig with arbitrary = [typeof<PacketGenerator>; typeof<JsonGenerators>] }
 
 let objTuples (obj: JObject) = [ for pair in (obj :> IEnumerable<KeyValuePair<string,JToken>>) do yield pair.Key, pair.Value]
 

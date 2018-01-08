@@ -52,7 +52,7 @@ type ProtocolGenerators =
         { new Arbitrary<ByteSegment>() with
             override __.Generator = genSegment }
 
-let config = { FsCheck.Config.Default with Arbitrary = [typeof<ProtocolGenerators>] }
+let config = { FsCheckConfig.defaultConfig with arbitrary = [typeof<ProtocolGenerators>] }
 
 [<Tests>]
 let properties =
