@@ -30,7 +30,7 @@ let private resources =
 let private sendResource res: WebPart = fun ctx ->
     {
         ctx with response = { ctx.response with content = Bytes res.bytes.Value; status = HTTP_200.status }
-    } |> Some |> Async.result
+    } |> Some |> async.Return
 
 /// Serve the embeded socket.io js client in the specified basePath
 let handleInPath (basePath: string) =

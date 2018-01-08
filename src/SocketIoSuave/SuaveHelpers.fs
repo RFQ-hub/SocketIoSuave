@@ -22,7 +22,7 @@ let setCookieSync (cookie : HttpCookie) (response: HttpResult) =
 
     let cookieHeaders =
         response.cookies
-        |> Map.put cookie.name cookie // possibly overwrite
+        |> Map.add cookie.name cookie // possibly overwrite
         |> Map.toList
         |> List.map (snd >> HttpCookie.toHeader)
 

@@ -1,11 +1,11 @@
-version 5.2.5
+version 5.129.0
 
 source https://nuget.org/api/v2
 
 framework: >= net40
 
 nuget FSharp.Core >= 4.2.1
-nuget Suave >= 2.0.3
+nuget Suave >= 2.2.0
 nuget NewtonSoft.Json >= 7.0.1
 
 nuget Chessie >= 0.5.1

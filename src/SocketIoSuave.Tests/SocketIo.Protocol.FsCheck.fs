@@ -118,7 +118,7 @@ let rec expectJTokenEquals (t1: JToken) (t2: JToken) ignoreBinary=
     | JTokenType.Bytes, JTokenType.Bytes ->
         let b1 = (t1 :?> JValue).Value :?> byte[]
         let b2 = (t1 :?> JValue).Value :?> byte[]
-        Expect.isTrue (Array.equalsConstantTime b1 b2) "Same binary arrays"
+        Expect.isTrue (ArrayUtils.equals b1 b2) "Same binary arrays"
     | JTokenType.Object, JTokenType.Object ->
         let o1 = t1 :?> JObject
         let o2 = t2 :?> JObject

@@ -26,7 +26,7 @@ let dataEqual d1 d2 =
     | Empty, TextPacket(s) -> isNull s || s = "" 
     | BinaryPacket(d), Empty -> d.Count = 0
     | Empty, BinaryPacket(d) -> d.Count = 0
-    | BinaryPacket(d1), BinaryPacket(d2) -> Array.equalsConstantTime (d1 |> Segment.toArray) (d2 |> Segment.toArray)
+    | BinaryPacket(d1), BinaryPacket(d2) -> ArrayUtils.equals (d1 |> Segment.toArray) (d2 |> Segment.toArray)
     | _ -> false
 
 let packetEqual p1 p2 =
