@@ -183,7 +183,7 @@ type private SocketIoSocket(config : SocketIoConfig, engineSocket: IEngineIoSock
             try
                 do! handle Protocol.PacketDecoder.empty
             with
-            | :? Exception as ex ->
+            | ex ->
                 // If the engine has thrown for any reason we need to cleanup
                 log.error (
                     eventX "{socketId} engine loop throw has trown, closing. Error: {error}"
