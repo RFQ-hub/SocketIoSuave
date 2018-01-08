@@ -114,6 +114,7 @@ let main argv =
 
     let assemblyPath = Uri(System.Reflection.Assembly.GetExecutingAssembly().GetName().CodeBase).LocalPath
     let publicPath = Path.Combine(Path.GetDirectoryName(assemblyPath), "public")
+    printfn "Will serve files from %s" publicPath
     let suaveConf = { defaultConfig with logger = log; homeFolder = Some publicPath }
     startWebServer suaveConf app
     0

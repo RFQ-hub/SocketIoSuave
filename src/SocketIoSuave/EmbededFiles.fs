@@ -7,7 +7,7 @@ open System.IO
 open System.Reflection
 
 let private getResource name = 
-    use stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(name);
+    use stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(sprintf "SocketIoSuave.%s" name);
     use memStream = new MemoryStream(int stream.Length)
     stream.CopyTo(memStream)
     memStream.ToArray()
