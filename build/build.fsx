@@ -95,10 +95,14 @@ task "AssemblyInfo" ["?Clean"] {
         )
 }
 
+task "DotNetRestore" [] {
+    DotNetCli.Restore (fun p -> { p with WorkingDir = rootDir } )
+}
+
 // --------------------------------------------------------------------------------------
 // Clean build results
 
-task "Clean" [] {
+task "Clean" ["DotNetRestore"] {
     CleanDir artifactsDir
 
     !! solutionFile
@@ -109,7 +113,7 @@ task "Clean" [] {
 // --------------------------------------------------------------------------------------
 // Build library & test project
 
-task "Build" ["AssemblyInfo"] {
+task "Build" ["AssemblyInfo";"DotNetRestore"] {
     !! solutionFile
     |> MSBuildRelease "" "Rebuild"
     |> ignore
