@@ -1,4 +1,4 @@
-type project
+type file
 id Itg.SocketIoSuave
 owners ITG
 authors ITG
@@ -14,8 +14,11 @@ summary
     Socket.IO implementation for Suave web server
 description
     socket.io implementation for Suave web server
+files
+    ../../artifacts/bin/release/SocketIoSuave/netstandard2.0/SocketIoSuave.dll
 dependencies
-    Chessie >= 0.5.1
-    Suave >= 2.0.3
-    NewtonSoft.Json >= 7.0.1
-    FSharp.Core >= 4.0.0.1
+    framework:netstandard20
+        Chessie >= 0.6.0
+        Suave >= 2.2.0
+        NewtonSoft.Json >= 7.0.1
+        FSharp.Core >= 4.2.1 < 5.0.0

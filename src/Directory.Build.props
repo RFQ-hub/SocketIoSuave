@@ -1,0 +1,6 @@
+<Project>
+    <PropertyGroup>
+        <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+        <OutputPath>$(MSBuildThisFileDirectory)..\artifacts\bin\$(Configuration)\$(MSBuildProjectName)\</OutputPath>
+    </PropertyGroup>
+</Project>
