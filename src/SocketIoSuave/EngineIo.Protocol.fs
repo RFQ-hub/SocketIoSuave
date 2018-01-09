@@ -296,12 +296,18 @@ module PayloadEncoder =
             stream.Write(binData.Array, binData.Offset, binData.Count)
         stream.ToArray() |> Segment.ofArray
 
+    let private guessMessagesSize messages =
+        List.fold
+            (fun acc m -> acc + (PacketMessageEncoder.guessEncodeToStringLength m) + 4)
+            0
+            messages
+
     let encodeToString payload =
         let messages = payload |> Payload.getMessages
         if messages.Length = 0 then
             "0:"
         else
-            let sizeGuess = messages |> List.fold (fun acc m -> acc + (PacketMessageEncoder.guessEncodeToStringLength m) + 4) 0
+            let sizeGuess = guessMessagesSize messages
             let builder = StringBuilder(sizeGuess)
             for message in messages do
                 let messageStr = message |> PacketMessageEncoder.encodeToString
