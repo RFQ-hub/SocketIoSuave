@@ -3,9 +3,9 @@ id Itg.SocketIoSuave
 owners ITG
 authors ITG
 projectUrl
-    https://github.com/RFQ-hub/SuaveSocketIo
+    https://github.com/RFQ-hub/SocketIoSuave
 licenseUrl
-    https://github.com/RFQ-hub/SuaveSocketIo/blob/master/LICENSE.md
+    https://github.com/RFQ-hub/SocketIoSuave/blob/master/LICENSE.md
 requireLicenseAcceptance
     false
 copyright

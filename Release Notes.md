@@ -1,3 +1,7 @@
+### New in 0.4.1
+
+* Fixed links in NuGet package description
+
 ### New in 0.4
 
 * Update dependencies and move to netstandard 2.0
