@@ -1,6 +1,7 @@
 ### New in 0.4.1
 
 * Fixed links in NuGet package description
+* Add icon in NuGet package
 
 ### New in 0.4
 
