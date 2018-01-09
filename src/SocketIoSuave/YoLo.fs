@@ -1,5 +1,5 @@
 ﻿[<AutoOpen>]
-module YoLo
+module private YoLo
 
 // Subset of https://github.com/haf/YoLo/blob/master/YoLo.fs (License: WTFPL)
 

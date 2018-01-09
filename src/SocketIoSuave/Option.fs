@@ -1,4 +1,4 @@
-﻿module internal Option
+﻿module private Option
 
 open System
 

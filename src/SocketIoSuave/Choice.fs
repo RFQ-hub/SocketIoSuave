@@ -1,4 +1,4 @@
-﻿module internal SocketIoSuave.Choice
+﻿module private SocketIoSuave.Choice
 
 open System
 
