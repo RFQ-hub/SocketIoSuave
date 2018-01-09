@@ -1,3 +1,7 @@
+### New in 0.4
+
+* Update dependencies and move to netstandard 2.0
+
 ### New in 0.3
 
 * Add the `HttpContext` that started the socket.io call in the handler

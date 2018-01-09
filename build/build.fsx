@@ -150,7 +150,7 @@ task "SourceLink" [ "Build" ] {
     )
 }
 
-let noSourceLink = hasBuildParam "NoSourceLink"
+let noSourceLink = not (hasBuildParam "SourceLink")
 let finalBinaries = if isMono || noSourceLink then "Build" else "SourceLink"
 
 EmptyTask "FinalBinaries" [ finalBinaries ]

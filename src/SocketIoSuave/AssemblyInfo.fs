@@ -5,8 +5,8 @@ open System.Reflection
 [<assembly: AssemblyTitleAttribute("SocketIoSuave")>]
 [<assembly: AssemblyProductAttribute("SocketIoSuave")>]
 [<assembly: AssemblyDescriptionAttribute("Socket.IO implementation for Suave web server")>]
-[<assembly: AssemblyVersionAttribute("0.3")>]
-[<assembly: AssemblyFileVersionAttribute("0.3")>]
+[<assembly: AssemblyVersionAttribute("0.4")>]
+[<assembly: AssemblyFileVersionAttribute("0.4")>]
 [<assembly: AssemblyCompanyAttribute("ITG")>]
 do ()
 
@@ -14,6 +14,6 @@ module internal AssemblyVersionInformation =
     let [<Literal>] AssemblyTitle = "SocketIoSuave"
     let [<Literal>] AssemblyProduct = "SocketIoSuave"
     let [<Literal>] AssemblyDescription = "Socket.IO implementation for Suave web server"
-    let [<Literal>] AssemblyVersion = "0.3"
-    let [<Literal>] AssemblyFileVersion = "0.3"
+    let [<Literal>] AssemblyVersion = "0.4"
+    let [<Literal>] AssemblyFileVersion = "0.4"
     let [<Literal>] AssemblyCompany = "ITG"
