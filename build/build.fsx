@@ -164,6 +164,7 @@ task "Zip" ["FinalBinaries"] {
     let comment = sprintf "%s v%s" project release.NugetVersion
     let files =
         !! (mainBinDir </> "**/SocketIoSuave*.dll")
+        ++ (mainBinDir </> "**/SocketIoSuave*.xml")
     ZipHelper.CreateZip mainBinDir zipPath comment 9 false files
 
     AppVeyor.PushArtifact (fun p ->
