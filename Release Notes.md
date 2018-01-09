@@ -1,3 +1,7 @@
+### New in 0.4.2
+
+* Icon URL fix
+
 ### New in 0.4.1
 
 * Fixed links in NuGet package description
