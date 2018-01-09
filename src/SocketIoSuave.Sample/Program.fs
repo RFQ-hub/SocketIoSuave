@@ -46,7 +46,7 @@ with
     static member empty = { State.userName = None }
 
 [<EntryPoint>]
-let main argv = 
+let main argv =
     let socketio handlePackets = SocketIo(SocketIoConfig.empty, handlePackets).WebPart
 
     let mutable userCount = 0
@@ -84,7 +84,7 @@ let main argv =
                 | "stop typing" ->
                     socket.Broadcast ("stop typing", [{ TypingEvent.username = defaultArg state.userName "???" }])
                     state
-                | other ->
+                | _ ->
                     logVerbose (sprintf "Unknown command: %s" cmd)
                     state
 
@@ -105,7 +105,7 @@ let main argv =
             socketio (handlePacket State.empty)
             GET >=> choose [
                 browseHome
-            
+
                 path "/" >=> browseFileHome "index.html"
             ]
 
