@@ -1,0 +1,14 @@
+{
+    "files.exclude": {
+        ".vs/": true,
+        "build/.fake/": true,
+        ".paket/": true,
+        "paket-files/paket.restore.cached": true,
+        "**/.git": true,
+        "**/obj/": true,
+        "**/.DS_Store": true,
+        "artifacts/": true,
+        "packages/": true
+    },
+    "files.trimTrailingWhitespace": true
+}

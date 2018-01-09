@@ -1,0 +1,8 @@
+{
+    "recommendations": [
+        "msjsdiag.debugger-for-chrome",
+        "ms-vscode.csharp",
+        "Ionide.Ionide-fsharp",
+        "Ionide.Ionide-Paket"
+    ]
+}
