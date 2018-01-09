@@ -6,6 +6,8 @@ projectUrl
     https://github.com/RFQ-hub/SocketIoSuave
 licenseUrl
     https://github.com/RFQ-hub/SocketIoSuave/blob/master/LICENSE.md
+iconUrl
+    https://github.com/RFQ-hub/SocketIoSuave/blob/master/src/icon.png
 requireLicenseAcceptance
     false
 copyright
