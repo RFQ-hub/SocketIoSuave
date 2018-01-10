@@ -19,7 +19,7 @@ description
 files
     ../../artifacts/bin/release/SocketIoSuave/netstandard2.0/SocketIoSuave.dll
 dependencies
-    framework:netstandard20
+    framework: netstandard2
         Chessie >= 0.6.0
         Suave >= 2.2.0
         NewtonSoft.Json >= 7.0.1
