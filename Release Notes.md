@@ -1,3 +1,9 @@
+# Release Notes
+
+### New in 0.4.3
+
+* Fix packaging to specify netstandard 2.0
+
 ### New in 0.4.2
 
 * Icon URL fix
