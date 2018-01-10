@@ -15,7 +15,7 @@
     <None Include="paket.references" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\SocketIoSuave\SocketIoSuave.fsproj" />
+    <ProjectReference Include="..\SocketIoSuave\Itg.SocketIoSuave.fsproj" />
   </ItemGroup>
   <Import Project="..\..\.paket\Paket.Restore.targets" />
 </Project>

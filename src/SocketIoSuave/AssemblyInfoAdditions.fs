@@ -2,5 +2,5 @@
 
 open System.Runtime.CompilerServices
 
-[<assembly: InternalsVisibleToAttribute("SocketIoSuave.Tests")>]
+[<assembly: InternalsVisibleToAttribute("Itg.SocketIoSuave.Tests")>]
 do ()

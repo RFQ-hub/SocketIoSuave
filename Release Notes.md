@@ -1,5 +1,9 @@
 # Release Notes
 
+### New in 0.4.4
+
+* Fix invalid folder structure in nupkg
+
 ### New in 0.4.3
 
 * Fix packaging to specify netstandard 2.0

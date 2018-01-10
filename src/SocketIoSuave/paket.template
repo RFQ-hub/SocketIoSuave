@@ -17,7 +17,8 @@ summary
 description
     socket.io implementation for Suave web server
 files
-    ../../artifacts/bin/release/SocketIoSuave/netstandard2.0/SocketIoSuave.dll
+    ../../artifacts/bin/release/Itg.SocketIoSuave/netstandard2.0/Itg.SocketIoSuave.dll ==> lib/netstandard2.0
+    ../../artifacts/bin/release/Itg.SocketIoSuave/netstandard2.0/Itg.SocketIoSuave.xml ==> lib/netstandard2.0
 dependencies
     framework: netstandard2
         Chessie >= 0.6.0
