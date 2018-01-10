@@ -15,7 +15,7 @@ let configuration = "Release"
 let rootDir = Path.GetFullPath(__SOURCE_DIRECTORY__ </> "..")
 let artifactsDir = rootDir </> "artifacts"
 let sourceDir = rootDir </> "src"
-let mainBinDir = artifactsDir </> "bin" </> configuration </> "SocketIoSuave"
+let mainBinDir = artifactsDir </> "bin" </> configuration </> "Itg.SocketIoSuave"
 
 let company = "ITG"
 let project = "SocketIoSuave"
@@ -163,8 +163,8 @@ let zipPath = artifactsDir </> (sprintf "%s-%s.zip" project release.NugetVersion
 task "Zip" ["FinalBinaries"] {
     let comment = sprintf "%s v%s" project release.NugetVersion
     let files =
-        !! (mainBinDir </> "**/SocketIoSuave*.dll")
-        ++ (mainBinDir </> "**/SocketIoSuave*.xml")
+        !! (mainBinDir </> "**/Itg.SocketIoSuave*.dll")
+        ++ (mainBinDir </> "**/Itg.SocketIoSuave*.xml")
     ZipHelper.CreateZip mainBinDir zipPath comment 9 false files
 
     AppVeyor.PushArtifact (fun p ->
